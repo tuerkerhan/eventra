@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eventra Core - Detaylı UML Diyagramları</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Mermaid.js -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true, 
+            theme: 'default',
+            securityLevel: 'loose',
+            fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        });
+    </script>
+    <style>
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            overflow-x: auto;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased font-sans p-6 md:p-10">
+
+    <div class="max-w-7xl mx-auto space-y-12">
+        
+        <!-- Header -->
+        <header class="text-center space-y-4">
+            <span class="bg-blue-100 text-blue-800 text-sm font-semibold px-3 py-1 rounded-full uppercase tracking-wide">Eventra Core Module</span>
+            <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Core Architecture & UML</h1>
+            <p class="text-lg text-slate-600 max-w-3xl mx-auto">
+                Bu döküman sadece <strong>Eventra Core</strong> (Auth, Venue, Calendar, CRM, Reservation, Finance) modüllerine odaklanmaktadır. Operasyonel Flow kısımları bu mimari şemadan izole edilmiştir.
+            </p>
+        </header>
+
+        <!-- ERD Section -->
+        <section class="space-y-4">
+            <div class="border-b border-slate-200 pb-2">
+                <h2 class="text-2xl font-bold text-slate-800 inline-flex items-center gap-2">
+                    <svg class="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
+                    1. Detailed Entity-Relationship Diagram (ERD)
+                </h2>
+            </div>
+            <p class="text-slate-600">
+                Core modüllerin detaylı veritabanı şeması. Multi-Tenant yapısı gereği tüm ana entity'ler <code>ORGANIZATION</code>'a (Tenant) bağlıdır. Alanlar (fields) veri tipleriyle birlikte detaylandırılmıştır.
+            </p>
+            <div class="mermaid">
+erDiagram
+    %% AUTH & TENANT CORE
+    ORGANIZATION {
+        uuid id PK
+        string slug "Unique tenant identifier"
+        string name
+        string contact_email
+        string contact_phone
+        boolean is_active
+        datetime created_at
+    }
+
+    USER {
+        uuid id PK
+        uuid organization_id FK
+        uuid role_id FK
+        string email
+        string password_hash
+        string full_name
+        boolean is_active
+        datetime last_login
+    }
+
+    ROLE {
+        uuid id PK
+        uuid organization_id FK
+        string name "e.g., Admin, Sales"
+        jsonb permissions
+    }
+
+    %% VENUE & CALENDAR
+    VENUE {
+        uuid id PK
+        uuid organization_id FK
+        string name
+        string address
+        string phone
+    }
+
+    HALL {
+        uuid id PK
+        uuid venue_id FK
+        string name
+        int capacity
+        string color_code
+    }
+
+    EVENT_TYPE {
+        uuid id PK
+        uuid organization_id FK
+        string name "Wedding, Engagement, Meeting"
+        string default_color
+    }
+
+    %% CRM & CUSTOMER
+    CUSTOMER {
+        uuid id PK
+        uuid organization_id FK
+        string full_name
+        string phone
+        string email
+        string tc_no
+        string address
+        string source "e.g., Instagram, Walk-in"
+        datetime created_at
+    }
+
+    %% RESERVATION & FINANCE
+    RESERVATION {
+        uuid id PK
+        uuid organization_id FK
+        uuid customer_id FK
+        uuid hall_id FK
+        uuid event_type_id FK
+        uuid sales_rep_id FK "References User"
+        string status "Enum: ReservationStatus"
+        date event_date
+        time start_time
+        time end_time
+        int guest_count
+        decimal total_amount
+        decimal discount_amount
+        string contract_no
+        text internal_notes
+        datetime created_at
+    }
+
+    PAYMENT {
+        uuid id PK
+        uuid reservation_id FK
+        uuid recorded_by FK "References User"
+        decimal amount
+        date payment_date
+        string payment_method "Cash, Credit Card, Transfer"
+        string type "Deposit, Installment, Balance"
+        string receipt_no
+    }
+
+    PORTAL_ACCESS {
+        uuid id PK
+        uuid reservation_id FK
+        string access_token "Secure hash"
+        datetime expires_at
+        boolean is_active
+    }
+
+    %% RELATIONSHIPS
+    ORGANIZATION ||--o{ USER : "has"
+    ORGANIZATION ||--o{ ROLE : "defines"
+    ORGANIZATION ||--o{ VENUE : "owns"
+    ORGANIZATION ||--o{ CUSTOMER : "manages"
+    ORGANIZATION ||--o{ EVENT_TYPE : "defines"
+
+    ROLE ||--o{ USER : "assigned to"
+    VENUE ||--o{ HALL : "contains"
+    
+    CUSTOMER ||--o{ RESERVATION : "makes"
+    USER ||--o{ RESERVATION : "manages (sales rep)"
+    
+    RESERVATION }o--|| HALL : "booked at"
+    RESERVATION }o--|| EVENT_TYPE : "type of"
+    
+    RESERVATION ||--o{ PAYMENT : "receives"
+    RESERVATION ||--|| PORTAL_ACCESS : "has"
+            </div>
+        </section>
+
+        <!-- State Machine Section -->
+        <section class="space-y-4">
+            <div class="border-b border-slate-200 pb-2">
+                <h2 class="text-2xl font-bold text-slate-800 inline-flex items-center gap-2">
+                    <svg class="w-6 h-6 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                    2. Core Reservation State Machine
+                </h2>
+            </div>
+            <p class="text-slate-600">
+                Core süreçteki rezervasyon durum (Status) akışları. CRM Lead durumundan başlayıp, rezervasyon kesinleşmesi ve etkinlik sonrasındaki finansal kapanışa kadar giden döngü.
+            </p>
+            <div class="mermaid">
+stateDiagram-v2
+    %% Durum Tanımları
+    state "Yeni Talep (Lead)" as NewRequest
+    state "Ön Rezervasyon (Opsiyonlu)" as Optioned
+    state "Kapora Bekleniyor" as DepositPending
+    state "Kapora Alındı" as DepositPaid
+    state "Kesin Rezervasyon" as Confirmed
+    state "Müşteri Portalı Aktif" as PortalActive
+    state "Tamamlandı (Geçmiş Etkinlik)" as Completed
+    state "İptal Edildi" as Cancelled
+    state "Kaybedildi (Lost Lead)" as Lost
+
+    [*] --> NewRequest : Yeni Müşteri Eklendi
+    
+    NewRequest --> Optioned : Takvimde Tarih Seçildi & Temsilci Atandı
+    Optioned --> DepositPending : Teklif Sunuldu & Onaylandı
+    
+    %% Kapora Akışları
+    DepositPending --> DepositPaid : Payment (Kapora) Eklendi
+    Optioned --> DepositPaid : Direkt Kapora Alındı (Hızlı Akış)
+    
+    DepositPaid --> Confirmed : Sözleşme İmzalandı / Onaylandı
+    
+    %% Portal ve Kapanış
+    Confirmed --> PortalActive : Müşteri Portal Linki Gönderildi
+    PortalActive --> Completed : Etkinlik Gerçekleşti & Bakiye Sıfırlandı
+    Confirmed --> Completed : Etkinlik Gerçekleşti & Bakiye Sıfırlandı
+    
+    %% Negatif Akışlar
+    NewRequest --> Lost : Anlaşılamadı / Fiyat Yüksek
+    Optioned --> Cancelled : Opsiyon Süresi Doldu
+    DepositPending --> Cancelled : Ödeme Yapılmadı
+    Confirmed --> Cancelled : Sözleşme İptali
+    
+    Lost --> [*]
+    Cancelled --> [*]
+    Completed --> [*]
+            </div>
+        </section>
+
+        <!-- Sequence Diagram Section -->
+        <section class="space-y-4">
+            <div class="border-b border-slate-200 pb-2">
+                <h2 class="text-2xl font-bold text-slate-800 inline-flex items-center gap-2">
+                    <svg class="w-6 h-6 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path></svg>
+                    3. Reservation Creation & Validation Sequence
+                </h2>
+            </div>
+            <p class="text-slate-600">
+                <strong>Epic 5</strong> kapsamında belirtilen "Tarih/saat çakışma validation logic'i dahil" yeni rezervasyon oluşturma ve ödeme alma akışının sistem mimarisi (SvelteKit UI -> FastAPI -> PostgreSQL) üzerindeki dizilimi.
+            </p>
+            <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor SR as Sales Rep (Kullanıcı)
+    participant UI as SvelteKit (Frontend)
+    participant API as FastAPI (Backend)
+    participant DB as PostgreSQL (Database)
+
+    SR->>UI: Takvimde boş bir saate tıklar (New Reservation)
+    UI->>SR: Rezervasyon Formu açılır
+    SR->>UI: Müşteri bilgileri, Etkinlik Türü ve Saatleri girer, Kaydet der
+    
+    %% Çakışma Kontrolü
+    UI->>API: POST /api/v1/reservations (Payload: organization_id, hall_id, dates...)
+    API->>DB: Çakışma Kontrolü (SELECT FROM reservations WHERE hall_id AND time overlaps)
+    
+    alt Tarih Çakışması Var
+        DB-->>API: Mevcut rezervasyon kaydı döner
+        API-->>UI: HTTP 409 Conflict (Validation Error)
+        UI-->>SR: Hata Mesajı: "Bu salon ve saat aralığı dolu!"
+    else Tarih Müsait
+        DB-->>API: Kayıt bulunamadı (Null)
+        API->>DB: INSERT INTO customers (eğer yeni müşteri ise)
+        API->>DB: INSERT INTO reservations (status: 'Optioned')
+        DB-->>API: Reservation ID döner
+        API-->>UI: HTTP 201 Created
+        UI-->>SR: Başarı Mesajı & Rezervasyon Detay Sayfası Açılır
+    end
+    
+    %% Kapora Alma
+    SR->>UI: "Ödeme Ekle" (Add Payment) butonuna tıklar
+    UI->>SR: Ödeme Modalı açılır
+    SR->>UI: Kapora tutarını ve nakit/kart bilgisini girer
+    UI->>API: POST /api/v1/payments
+    API->>DB: INSERT INTO payments (type: 'Deposit')
+    API->>DB: UPDATE reservations SET status = 'DepositPaid'
+    DB-->>API: Success
+    API-->>UI: HTTP 201 Created
+    UI-->>SR: Takvimde ve Detayda Durum Rengi Güncellenir (Kapora Alındı)
+            </div>
+        </section>
+
+    </div>
+
+</body>
+</html>

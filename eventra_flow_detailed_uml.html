@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eventra Flow - Detaylı UML Diyagramları</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Mermaid.js -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true, 
+            theme: 'default',
+            securityLevel: 'loose',
+            fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        });
+    </script>
+    <style>
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            overflow-x: auto;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased font-sans p-6 md:p-10">
+
+    <div class="max-w-7xl mx-auto space-y-12">
+        
+        <!-- Header -->
+        <header class="text-center space-y-4">
+            <span class="bg-indigo-100 text-indigo-800 text-sm font-semibold px-3 py-1 rounded-full uppercase tracking-wide">Eventra Flow Module</span>
+            <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Flow Architecture & UML</h1>
+            <p class="text-lg text-slate-600 max-w-3xl mx-auto">
+                Bu döküman <strong>Eventra Flow</strong> (Event Workspace, Task Board, Timeline, Supplier Management) operasyonel modüllerine odaklanmaktadır. Organizasyon gününün sorunsuz yürütülmesi için gereken mimariyi gösterir.
+            </p>
+        </header>
+
+        <!-- ERD Section -->
+        <section class="space-y-4">
+            <div class="border-b border-slate-200 pb-2">
+                <h2 class="text-2xl font-bold text-slate-800 inline-flex items-center gap-2">
+                    <svg class="w-6 h-6 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    1. Flow Entity-Relationship Diagram (ERD)
+                </h2>
+            </div>
+            <p class="text-slate-600">
+                Operasyon veritabanı şeması. <code>RESERVATION</code> tablosundan 1-1 ilişki ile tetiklenen <code>EVENT_WORKSPACE</code> ve onun etrafında şekillenen Task (Görev) ve Timeline (Gün Akış Planı) objelerini gösterir.
+            </p>
+            <div class="mermaid">
+erDiagram
+    %% BOUNDARY ENTITIES (From Core)
+    RESERVATION {
+        uuid id PK
+        string status
+    }
+    ORGANIZATION {
+        uuid id PK
+    }
+
+    %% FLOW CORE
+    EVENT_WORKSPACE {
+        uuid id PK
+        uuid reservation_id FK "1-1 relation with Core Reservation"
+        string operation_status "Enum: OperationStatus"
+        datetime created_at
+    }
+
+    TASK {
+        uuid id PK
+        uuid workspace_id FK
+        uuid assignee_id FK "User ID"
+        uuid supplier_id FK "Nullable"
+        string title
+        text description
+        string status "Enum: TaskStatus"
+        string priority "High, Medium, Low"
+        date due_date
+        boolean requires_client_approval
+    }
+
+    TIMELINE_ITEM {
+        uuid id PK
+        uuid workspace_id FK
+        uuid responsible_user_id FK
+        time start_time
+        time end_time
+        string action_name
+        boolean is_critical
+    }
+
+    %% SUPPLIERS
+    SUPPLIER {
+        uuid id PK
+        uuid organization_id FK
+        string company_name
+        string contact_person
+        string phone
+        string category "Enum: SupplierCategory (Photo, Cake, DJ, etc.)"
+        int performance_score
+    }
+
+    SUPPLIER_CONFIRMATION {
+        uuid id PK
+        uuid task_id FK
+        uuid supplier_id FK
+        string confirmation_token "Secure Unique Hash"
+        string status "Enum: Pending, Accepted, Rejected"
+        text supplier_note
+        datetime sent_at
+        datetime responded_at
+    }
+
+    %% RELATIONSHIPS
+    RESERVATION ||--|| EVENT_WORKSPACE : "instantiates"
+    EVENT_WORKSPACE ||--o{ TASK : "contains"
+    EVENT_WORKSPACE ||--o{ TIMELINE_ITEM : "schedules"
+    
+    ORGANIZATION ||--o{ SUPPLIER : "works with"
+    
+    TASK ||--o{ SUPPLIER_CONFIRMATION : "generates link for"
+    SUPPLIER ||--o{ SUPPLIER_CONFIRMATION : "answers"
+    SUPPLIER ||--o{ TASK : "assigned to"
+            </div>
+        </section>
+
+        <!-- State Machine Section -->
+        <section class="space-y-4">
+            <div class="border-b border-slate-200 pb-2">
+                <h2 class="text-2xl font-bold text-slate-800 inline-flex items-center gap-2">
+                    <svg class="w-6 h-6 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    2. Task Board State Machine
+                </h2>
+            </div>
+            <p class="text-slate-600">
+                <code>EVENT_WORKSPACE</code> içindeki bir <code>TASK</code> objesinin yaşam döngüsü. Görevlerin operasyon ekibi, müşteri (Client Portal) ve dış tedarikçi (Supplier Link) onayları arasında nasıl dolaştığını gösterir.
+            </p>
+            <div class="mermaid">
+stateDiagram-v2
+    state "Yapılacak (To Do)" as ToDo
+    state "Devam Ediyor (In Progress)" as InProgress
+    state "Müşteri Onayı Bekliyor (Waiting Client Approval)" as WaitingClient
+    state "Tedarikçide (At Supplier)" as WaitingSupplier
+    state "Tedarikçi Sorunu (Issue / Rejected)" as SupplierIssue
+    state "Tamamlandı (Done)" as Done
+
+    [*] --> ToDo : Event Şablonundan (Template) Task Üretildi
+    
+    ToDo --> InProgress : Ekip üyesi çalışmaya başladı
+    
+    %% Müşteri Onay Akışı
+    InProgress --> WaitingClient : Müşteri Portalına onay isteği düştü
+    WaitingClient --> InProgress : Müşteri Revize İstedi (Rejected)
+    WaitingClient --> Done : Müşteri Onayladı
+    
+    %% Tedarikçi Akışı
+    InProgress --> WaitingSupplier : Tedarikçiye WhatsApp teyit linki gönderildi
+    WaitingSupplier --> SupplierIssue : Tedarikçi Uygun Değil / Reddetti
+    WaitingSupplier --> Done : Tedarikçi Linkten Onayladı
+    
+    %% Hata Çözümü
+    SupplierIssue --> InProgress : Yeni Tedarikçi Atandı (Resolve Issue)
+    
+    %% Direkt Akış
+    InProgress --> Done : İçi operasyon tamamlandı (Manuel onay)
+    
+    Done --> [*]
+            </div>
+        </section>
+
+        <!-- Sequence Diagram Section -->
+        <section class="space-y-4">
+            <div class="border-b border-slate-200 pb-2">
+                <h2 class="text-2xl font-bold text-slate-800 inline-flex items-center gap-2">
+                    <svg class="w-6 h-6 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    3. Supplier Confirmation (WhatsApp) Sequence
+                </h2>
+            </div>
+            <p class="text-slate-600">
+                Organizasyon operasyonunda bir tedarikçiye (Örn: Fotoğrafçı) uygulamaya giriş yapmadan <strong>WhatsApp (veya SMS) Deep Link</strong> üzerinden teyit aldırma (Confirmation Pipeline) süreci.
+            </p>
+            <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor ORG as Operasyon Sorumlusu
+    participant UI as SvelteKit (Admin Panel)
+    participant API as FastAPI (Backend)
+    participant DB as PostgreSQL
+    participant WA as WhatsApp API / Provider
+    actor SUP as Tedarikçi (Supplier)
+    participant SUI as SvelteKit (Tedarikçi Public Sayfası)
+
+    ORG->>UI: Task Panosundan "Teyit İste" butonuna basar
+    UI->>API: POST /api/v1/flow/tasks/{id}/confirmations (Payload: supplier_id)
+    
+    API->>DB: INSERT INTO supplier_confirmations (status: 'Pending', token: XYZ)
+    DB-->>API: Row Created
+    
+    API->>WA: WhatsApp Mesajı Tetikle (Message Template: "08.06.2026 tarihinde müsait misiniz? Link: eventra.app/c/XYZ")
+    WA->>SUP: Tedarikçinin telefonuna WhatsApp mesajı düşer
+    
+    %% Tedarikçi Linke Tıklar
+    SUP->>SUI: Telefondan eventra.app/c/XYZ linkine tıklar
+    SUI->>API: GET /api/v1/public/confirmations/XYZ
+    API-->>SUI: Etkinlik detaylarını ve onay butonlarını (Payload) döner
+    
+    alt Tedarikçi Onaylar
+        SUP->>SUI: "Kabul Ediyorum" (Accept) Butonuna Basar
+        SUI->>API: POST /api/v1/public/confirmations/XYZ/accept
+        API->>DB: UPDATE supplier_confirmations SET status = 'Accepted'
+        API->>DB: UPDATE tasks SET status = 'Done'
+        API-->>SUI: HTTP 200 OK (Başarı Animasyonu)
+        SUI-->>SUP: "Teşekkürler, teyidiniz alınmıştır."
+        API-->>UI: WebSocket Event / Polling -> Task statüsü UI'da anında Done olur
+    else Tedarikçi Reddeder
+        SUP->>SUI: "Uygun Değilim" (Reject) Butonuna Basar
+        SUI->>API: POST /api/v1/public/confirmations/XYZ/reject (Payload: note)
+        API->>DB: UPDATE supplier_confirmations SET status = 'Rejected'
+        API->>DB: UPDATE tasks SET status = 'SupplierIssue'
+        API-->>SUI: HTTP 200 OK
+        SUI-->>SUP: "Bilgi kaydedildi."
+        API-->>UI: UI'da Task Kırmızıya (Issue) döner
+    end
+            </div>
+        </section>
+
+    </div>
+
+</body>
+</html>

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eventra Pro - Detaylı UML Diyagramları</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Mermaid.js -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true, 
+            theme: 'default',
+            securityLevel: 'loose',
+            fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        });
+    </script>
+    <style>
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            overflow-x: auto;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased font-sans p-6 md:p-10">
+
+    <div class="max-w-7xl mx-auto space-y-12">
+        
+        <!-- Header -->
+        <header class="text-center space-y-4">
+            <span class="bg-amber-100 text-amber-800 text-sm font-semibold px-3 py-1 rounded-full uppercase tracking-wide">Eventra Pro Module</span>
+            <h1 class="text-4xl font-extrabold text-slate-900 tracking-tight">Pro Architecture & UML</h1>
+            <p class="text-lg text-slate-600 max-w-3xl mx-auto">
+                Bu döküman <strong>Eventra Pro</strong> paketiyle gelen <strong>CRM Pipeline</strong>, <strong>Docs (Belge Otomasyonu)</strong> ve gelişmiş <strong>Client Portal</strong> mimarisine odaklanmaktadır.
+            </p>
+        </header>
+
+        <!-- ERD Section -->
+        <section class="space-y-4">
+            <div class="border-b border-slate-200 pb-2">
+                <h2 class="text-2xl font-bold text-slate-800 inline-flex items-center gap-2">
+                    <svg class="w-6 h-6 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    1. Pro Features Entity-Relationship Diagram (ERD)
+                </h2>
+            </div>
+            <p class="text-slate-600">
+                CRM, Sözleşme Şablonları (Templates) ve Teklif (Proposal) veritabanı modellerinin Core <code>RESERVATION</code> yapısıyla olan ilişkisi.
+            </p>
+            <div class="mermaid">
+erDiagram
+    %% CORE REFERENCES
+    ORGANIZATION {
+        uuid id PK
+    }
+    RESERVATION {
+        uuid id PK
+        string status
+    }
+    USER {
+        uuid id PK
+        string full_name
+    }
+
+    %% CRM PIPELINE & LEADS
+    LEAD {
+        uuid id PK
+        uuid organization_id FK
+        uuid assigned_user_id FK "Sales Rep"
+        string full_name
+        string phone
+        string pipeline_stage "Enum: PipelineStage"
+        datetime next_contact_date
+        string loss_reason
+    }
+
+    PROPOSAL {
+        uuid id PK
+        uuid lead_id FK
+        uuid organization_id FK
+        decimal total_amount
+        string validity_date
+        string status "Enum: Draft, Sent, Accepted, Rejected"
+        text notes
+    }
+
+    %% DOCS & TEMPLATES
+    DOCUMENT_TEMPLATE {
+        uuid id PK
+        uuid organization_id FK
+        string name "e.g., Düğün Sözleşmesi"
+        string type "Enum: Contract, Proposal, Receipt"
+        string file_path "S3/MinIO Object Path (.docx)"
+        jsonb variables "List of placeholder variables"
+    }
+
+    GENERATED_DOCUMENT {
+        uuid id PK
+        uuid organization_id FK
+        uuid reservation_id FK "Nullable (if Proposal)"
+        uuid proposal_id FK "Nullable"
+        uuid template_id FK
+        string pdf_url "URL to generated PDF"
+        datetime generated_at
+        boolean is_signed
+    }
+
+    %% PORTAL EXTENSIONS
+    PORTAL_ACCESS {
+        uuid id PK
+        uuid reservation_id FK
+        string access_token "Secure hash"
+        datetime expires_at
+        jsonb audit_logs "Tracks view times, IP etc."
+    }
+
+    %% RELATIONSHIPS
+    ORGANIZATION ||--o{ LEAD : "tracks"
+    ORGANIZATION ||--o{ DOCUMENT_TEMPLATE : "owns"
+    
+    USER ||--o{ LEAD : "manages (Sales Rep)"
+    
+    LEAD ||--o{ PROPOSAL : "receives"
+    PROPOSAL ||--|| RESERVATION : "converts to"
+    
+    DOCUMENT_TEMPLATE ||--o{ GENERATED_DOCUMENT : "used for"
+    RESERVATION ||--o{ GENERATED_DOCUMENT : "has documents"
+    PROPOSAL ||--o{ GENERATED_DOCUMENT : "has pdf quote"
+    
+    RESERVATION ||--|| PORTAL_ACCESS : "exposes to client via"
+            </div>
+        </section>
+
+        <!-- State Machine Section -->
+        <section class="space-y-4">
+            <div class="border-b border-slate-200 pb-2">
+                <h2 class="text-2xl font-bold text-slate-800 inline-flex items-center gap-2">
+                    <svg class="w-6 h-6 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                    2. CRM Pipeline State Machine
+                </h2>
+            </div>
+            <p class="text-slate-600">
+                Eventra Pro'nun kalbi olan <strong>CRM Pipeline</strong> akışı. Bir <code>LEAD</code>'in sisteme girişinden rezervasyona dönüşme (Won) veya kaybedilme (Lost) sürecine kadar geçen durumları.
+            </p>
+            <div class="mermaid">
+stateDiagram-v2
+    state "Yeni Talep (New Lead)" as NewLead
+    state "Görüşüldü (Contacted)" as Contacted
+    state "Teklif İletildi (Proposal Sent)" as ProposalSent
+    state "Müzakere (Negotiation)" as Negotiation
+    state "Opsiyonlandı (Optioned / Pre-booking)" as Optioned
+    state "Kazanıldı (Won / Reservation Active)" as Won
+    state "Kaybedildi (Lost)" as Lost
+
+    [*] --> NewLead : Web Form, Instagram, Telefon, Kapıdan
+    
+    NewLead --> Contacted : Satış temsilcisi aradı/görüştü
+    Contacted --> ProposalSent : Teklif (Proposal/Quote) hazırlandı & iletildi
+    
+    ProposalSent --> Negotiation : Müşteri revize veya indirim istedi
+    Negotiation --> ProposalSent : Yeni revize teklif gönderildi
+    
+    ProposalSent --> Optioned : Teklif onaylandı, takvime opsiyon atıldı
+    Optioned --> Won : Kapora (Deposit) alındı, Sözleşme imzalandı
+    
+    %% Negatif Akışlar (Lost Pipeline)
+    NewLead --> Lost : Ulaşılamadı / Yanlış Numara
+    Contacted --> Lost : Bütçe Uymadı / Salon Beğenilmedi
+    ProposalSent --> Lost : Rakip Salon Tercih Edildi
+    Negotiation --> Lost : Fiyat Anlaşmazlığı
+    Optioned --> Lost : Opsiyon Süresi Doldu / Ödeme Gelmedi
+    
+    Won --> [*] : Core Reservation Akışına Devredilir
+    Lost --> [*]
+            </div>
+        </section>
+
+        <!-- Sequence Diagram Section -->
+        <section class="space-y-4">
+            <div class="border-b border-slate-200 pb-2">
+                <h2 class="text-2xl font-bold text-slate-800 inline-flex items-center gap-2">
+                    <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                    3. Document Generation & Client Portal Sequence
+                </h2>
+            </div>
+            <p class="text-slate-600">
+                Word şablonundan PDF (Sözleşme/Teklif) üretme (<strong>Document Engine</strong>) ve bunu <strong>Client Portal</strong> üzerinden müşteriye güvenli bir linkle sunma sürecinin mimari etkileşimi.
+            </p>
+            <div class="mermaid">
+sequenceDiagram
+    autonumber
+    actor Rep as Sales Rep
+    participant UI as SvelteKit (Admin)
+    participant API as FastAPI Backend
+    participant DocEng as Document Engine (LibreOffice / Headless)
+    participant DB as PostgreSQL
+    actor Client as Müşteri (Customer)
+    participant Portal as SvelteKit (Client Portal)
+
+    %% Document Generation Phase
+    Rep->>UI: "PDF Sözleşme Üret" Butonuna Basar
+    UI->>API: POST /api/v1/docs/generate (Payload: template_id, reservation_id)
+    API->>DB: Fetch Reservation, Customer, and Finance Data
+    API->>DocEng: Inject DB data into Word (.docx) Template variables (e.g. {{customer.full_name}})
+    DocEng-->>API: Convert to PDF and return File Buffer / S3 Link
+    API->>DB: INSERT INTO generated_documents (pdf_url)
+    API-->>UI: Document Generation Success (Returns PDF Link)
+    
+    %% Portal Link Generation
+    Rep->>UI: "Müşteriye Gönder (Portal Link)" Tıklar
+    UI->>API: POST /api/v1/portal/send-link (Payload: reservation_id)
+    API->>DB: UPSERT portal_access (Generate access_token)
+    API->>Client: Send SMS (Webhook/Provider): "Sözleşmeniz ve formunuz hazır: eventra.app/p/XYZ"
+    
+    %% Client Interaction Phase
+    Client->>Portal: Telefonda eventra.app/p/XYZ linkini açar
+    Portal->>API: GET /api/v1/portal/XYZ/details
+    API-->>Portal: Return Event details, Forms, and PDF Document link
+    Client->>Portal: Kendi eksik bilgilerini doldurur & Sözleşmeyi görüntüler
+    Portal->>API: PUT /api/v1/portal/XYZ/update (Payload: Form Data)
+    API->>DB: Müşteri bilgilerini ve Reservation notlarını günceller
+    API->>DB: Update portal_access audit_logs (Log: "Client viewed contract")
+    API-->>Portal: HTTP 200 OK (Success)
+            </div>
+        </section>
+
+    </div>
+
+</body>
+</html>

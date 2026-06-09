@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eventra - Görsel UML Diyagramları</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Mermaid.js for rendering UML visually -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true, 
+            theme: 'default',
+            securityLevel: 'loose',
+            fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        });
+    </script>
+    <style>
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 antialiased font-sans p-6">
+
+    <div class="max-w-6xl mx-auto space-y-12">
+        
+        <!-- Header -->
+        <header class="text-center space-y-4">
+            <h1 class="text-4xl font-extrabold text-gray-900">Eventra Architecture & UML</h1>
+            <p class="text-lg text-gray-600 max-w-3xl mx-auto">
+                Sistemin <strong>Multi-Tenant</strong> veritabanı şemasını gösteren <strong>Entity-Relationship Diagram (ERD)</strong> ve operasyonel akışları gösteren <strong>State Machine</strong> diyagramları aşağıda görselleştirilmiştir.
+            </p>
+        </header>
+
+        <!-- ERD Section -->
+        <section class="space-y-4">
+            <h2 class="text-2xl font-bold text-gray-800 border-b-2 border-indigo-500 pb-2 inline-block">1. Entity-Relationship Diagram (ERD)</h2>
+            <p class="text-gray-600">
+                Aşağıdaki şema, Eventra'nın <strong>Multi-Tenant</strong> veritabanı yapısını göstermektedir. Bütün core entity'ler (Venue, User, Customer, Reservation) doğrudan <code>ORGANIZATION</code> tablosuna (Tenant) bağlıdır. <strong>Backend</strong> tarafındaki <strong>Middleware</strong>, bu mimariyi kullanarak izolasyon sağlar.
+            </p>
+            <div class="mermaid">
+erDiagram
+    %% 1. AUTH & TENANT CORE
+    ORGANIZATION ||--o{ USER : "has"
+    ORGANIZATION ||--o{ ROLE : "defines"
+    ROLE ||--o{ USER : "assigned to"
+    ROLE ||--o{ PERMISSION : "contains"
+
+    ORGANIZATION {
+        uuid id PK
+        string slug "Unique tenant identifier"
+        string name
+        boolean is_active
+    }
+
+    USER {
+        uuid id PK
+        uuid organization_id FK
+        uuid role_id FK
+        string email
+        string password_hash
+        string full_name
+        boolean is_active
+    }
+
+    %% 2. VENUE & CALENDAR
+    ORGANIZATION ||--o{ VENUE : "owns"
+    VENUE ||--o{ HALL : "contains"
+    ORGANIZATION ||--o{ EVENT_TYPE : "defines"
+    ORGANIZATION ||--o{ PACKAGE : "offers"
+    ORGANIZATION ||--o{ MENU : "offers"
+
+    VENUE {
+        uuid id PK
+        uuid organization_id FK
+        string name
+        string address
+    }
+
+    HALL {
+        uuid id PK
+        uuid venue_id FK
+        string name
+        int capacity
+    }
+
+    %% 3. CRM & CUSTOMERS
+    ORGANIZATION ||--o{ CUSTOMER : "manages"
+    ORGANIZATION ||--o{ LEAD : "tracks"
+    CUSTOMER ||--o{ RESERVATION : "makes"
+
+    CUSTOMER {
+        uuid id PK
+        uuid organization_id FK
+        string full_name
+        string phone
+        string email
+        string tc_no
+    }
+
+    %% 4. RESERVATION FLOW & FINANCE
+    RESERVATION }o--|| HALL : "booked at"
+    RESERVATION }o--|| EVENT_TYPE : "type of"
+    RESERVATION }o--|| PACKAGE : "includes"
+    RESERVATION ||--o{ PAYMENT : "receives"
+    RESERVATION ||--o{ PAYMENT_PLAN : "scheduled via"
+    RESERVATION ||--|| PORTAL_ACCESS : "accessed by"
+    RESERVATION ||--|| EVENT_WORKSPACE : "generates"
+
+    RESERVATION {
+        uuid id PK
+        uuid organization_id FK
+        uuid customer_id FK
+        string status "Enum: ReservationStatus"
+        date event_date
+        decimal total_amount
+    }
+
+    PAYMENT {
+        uuid id PK
+        uuid reservation_id FK
+        decimal amount
+        string payment_method
+        string type "Deposit, Balance"
+    }
+
+    PORTAL_ACCESS {
+        uuid id PK
+        uuid reservation_id FK
+        string access_token
+        datetime expires_at
+    }
+
+    %% 5. FLOW (OPERATIONS) & SUPPLIERS
+    EVENT_WORKSPACE ||--o{ TASK : "contains"
+    EVENT_WORKSPACE ||--o{ TIMELINE_ITEM : "schedules"
+    ORGANIZATION ||--o{ SUPPLIER : "works with"
+    EVENT_WORKSPACE ||--o{ SUPPLIER_CONFIRMATION : "requires"
+    SUPPLIER ||--o{ SUPPLIER_CONFIRMATION : "provides"
+
+    EVENT_WORKSPACE {
+        uuid id PK
+        uuid reservation_id FK
+        string status "Enum: OperationStatus"
+    }
+
+    TASK {
+        uuid id PK
+        uuid workspace_id FK
+        string title
+        string status "Enum: TaskStatus"
+    }
+
+    SUPPLIER {
+        uuid id PK
+        uuid organization_id FK
+        string company_name
+        string category
+    }
+            </div>
+        </section>
+
+        <!-- State Machine 1 Section -->
+        <section class="space-y-4">
+            <h2 class="text-2xl font-bold text-gray-800 border-b-2 border-green-500 pb-2 inline-block">2. State Machine Diagram: Reservation Status</h2>
+            <p class="text-gray-600">
+                Müşterinin <strong>Lead</strong> aşamasından başlayıp organizasyonun finansal kapanışına kadar geçirdiği <code>ReservationStatus</code> yaşam döngüsü.
+            </p>
+            <div class="mermaid">
+stateDiagram-v2
+    [*] --> NewRequest : CRM Lead Created
+    
+    NewRequest --> Optioned : Tarih & Salon Rezerve (Ön Rezervasyon)
+    Optioned --> DepositPending : Teklif Onaylandı
+    
+    DepositPending --> DepositPaid : Kapora Alındı
+    Optioned --> DepositPaid : Direkt Kapora Alındı
+    
+    DepositPaid --> Confirmed : Sözleşme İmzalandı / Onaylandı
+    
+    Confirmed --> CustomerPortalActive : Müşteri Bilgileri Dolduruyor
+    CustomerPortalActive --> EventUpcoming : Son Ödemeler / Teyitler
+    
+    EventUpcoming --> Completed : Organizasyon Bitti (Ödeme Kapanışı)
+    
+    %% İptal Akışları
+    NewRequest --> Lost : Anlaşılamadı
+    Optioned --> Cancelled : Opsiyon Süresi Doldu / Vazgeçti
+    DepositPending --> Cancelled : Ödeme Alınamadı
+    Confirmed --> Cancelled : Müşteri İptali
+    
+    Lost --> [*]
+    Cancelled --> [*]
+    Completed --> [*]
+            </div>
+        </section>
+
+        <!-- State Machine 2 Section -->
+        <section class="space-y-4">
+            <h2 class="text-2xl font-bold text-gray-800 border-b-2 border-purple-500 pb-2 inline-block">3. State Machine Diagram: Flow / Task Status</h2>
+            <p class="text-gray-600">
+                <code>EventWorkspace</code> içerisindeki operasyonel görevlerin (<strong>Tasks</strong>) ve müşteri/tedarikçi teyitlerinin akışını gösteren <strong>State Machine</strong>.
+            </p>
+            <div class="mermaid">
+stateDiagram-v2
+    [*] --> ToDo : Görev Oluşturuldu (Şablondan/Manuel)
+    
+    ToDo --> InProgress : Ekip Üyesi Çalışmaya Başladı
+    
+    InProgress --> WaitingClientApproval : Müşteri Portalından Onay Bekleniyor
+    InProgress --> AtSupplier : Tedarikçiye WhatsApp Teyit Linki Gitti
+    
+    WaitingClientApproval --> InProgress : Müşteri Reddetti / Revize İstedi
+    WaitingClientApproval --> Done : Müşteri Onayladı
+    
+    AtSupplier --> Issue : Tedarikçi Uygun Değil / Sorun Var
+    AtSupplier --> Done : Tedarikçi Onayladı
+    
+    Issue --> InProgress : Farklı Tedarikçi Atandı / Çözüldü
+    
+    InProgress --> Done : Tamamlandı
+    
+    Done --> [*]
+            </div>
+        </section>
+
+    </div>
+
+</body>
+</html>
