@@ -1,0 +1,362 @@
+İlk modülde **önce full backend, sonra frontend** yapma. Bu üründe en riskli şey veri modeli değil, **takvim + rezervasyon akışının kullanıcıya doğru hissettirmesi**. O yüzden doğru yöntem:
+
+# Vertical slice yap
+
+Yani bir özelliği baştan sona çalıştır:
+
+**Müşteri oluştur → rezervasyon oluştur → takvimde gör → kapora gir → rezervasyon detayında gör.**
+
+Bunu bitir. Sonra genişlet.
+
+## Sıra şu olmalı
+
+### 1. Önce mini ürün modeli
+
+Tam UML değil. Büyük UML’ye gömülme.
+
+Başlangıçta şunları çiz:
+
+* **ERD / database ilişkileri**
+* **modül sınırları**
+* **rezervasyon state machine**
+* **1-2 sequence diagram**
+* **takvim ekranı wireframe’i**
+
+İlk modül için ana modeller:
+
+```text
+Organization
+User
+Role
+Permission
+
+Venue
+Hall
+
+EventType
+Customer
+Reservation
+ReservationNote
+
+Package
+Menu
+
+Payment
+PaymentPlan
+
+AuditLog
+```
+
+Şimdiden eklemen gereken genişleme noktaları:
+
+```text
+Reservation.status
+Reservation.operation_status
+Reservation.payment_status
+
+EventType.color
+EventType.default_duration
+EventType.default_fields_json
+EventType.default_checklist_json
+
+Reservation.internal_notes
+Reservation.customer_visible_notes
+Reservation.special_guest_notes
+Reservation.flex_start_rule
+```
+
+Bunlar ileride Flow modülüne bağlanacak. İlk modülde Flow yapmayacaksın ama veri modelini kör bırakmayacaksın.
+
+---
+
+### 2. Backend iskeleti
+
+FastAPI + PostgreSQL mantıklı.
+
+İlk backend hedefin:
+
+* auth
+* tenant / organization ayrımı
+* user / role / permission
+* hall / venue CRUD
+* event type CRUD
+* customer CRUD
+* reservation CRUD
+* payment CRUD
+* calendar endpoint
+* audit log
+* seed data
+
+Backend’i ilk günden multi-tenant yaz. Sonradan eklemek baş ağrıtır.
+
+Her ana tabloda:
+
+```text
+organization_id
+created_at
+updated_at
+deleted_at
+created_by_id
+```
+
+olmalı.
+
+---
+
+### 3. Aynı anda basit frontend
+
+Backend tamamen bitmeden frontend’e geç.
+
+SvelteKit ile ilk ekranlar:
+
+* login
+* dashboard
+* calendar
+* new reservation modal/page
+* reservation detail
+* customer detail
+* payments section
+* event type settings
+
+Takvim ekranını erken yaz. Çünkü takvim UI’ı API tasarımını değiştirir. Backend’i teorik kurarsan sonra frontend’de “bu endpoint böyle olmazmış” diye dönersin.
+
+---
+
+### 4. İlk gerçek milestone
+
+İlk canlı demo şu olmalı:
+
+```text
+1. Kullanıcı giriş yapar.
+2. Salon seçer.
+3. Takvimde boş gün görür.
+4. Yeni rezervasyon açar.
+5. Müşteri bilgisi girer.
+6. Organizasyon tipi seçer.
+7. Kapora girer.
+8. Rezervasyon takvimde renkli görünür.
+9. Detay sayfasında ödeme/kalan bakiye görünür.
+10. PDF/çıktı için placeholder buton görünür.
+```
+
+PDF, portal, Word template sonra. İlk önce takvim ve rezervasyon taş gibi olsun.
+
+# Agent’a yaptırılır mı?
+
+Yaptırılır, ama **komple ürünü “al yap” diye verirsen çöpe dönme ihtimali yüksek**.
+
+Codex ve Antigravity gibi agentlar artık ciddi işler yapabiliyor. Codex tarafında OpenAI, aracın kod okuyup düzenleyebildiğini ve çalıştırabildiğini; cloud tarafta da görevleri arka planda yürütebildiğini anlatıyor. ([OpenAI Developers][1]) Google Antigravity de editor, terminal ve browser üzerinde agentların planlama, kodlama ve doğrulama yapabildiği agentic development platformu olarak tanıtılıyor. ([Google Antigravity][2])
+
+Ama bu şu demek değil: “Ben ürün fikrini veririm, o düzgün SaaS çıkarır.”
+
+Çıkarmaz. Özellikle şu yerlerde saçmalar:
+
+* multi-tenant güvenlik
+* yetki sistemi
+* para/ödeme kayıtları
+* migration kalitesi
+* yanlış soyutlama
+* frontend state karmaşası
+* takvim edge-case’leri
+* silme/güncelleme audit logları
+* ileride modül genişletilebilirliği
+* gereksiz generic architecture
+
+Agent iyi junior/orta seviye developer gibi kullanılmalı. Sen mimar ve reviewer olacaksın.
+
+# En doğru agent kullanımı
+
+Repo’ya ilk günden şunları koy:
+
+```text
+README.md
+AGENTS.md
+ARCHITECTURE.md
+DECISIONS.md
+DATABASE.md
+API_CONTRACT.md
+```
+
+`AGENTS.md` içinde kesin kurallar:
+
+```text
+- Multi-tenant kuralları bozulmayacak.
+- organization_id olmayan ana tablo eklenmeyecek.
+- Migration olmadan model değişmeyecek.
+- Her endpoint yetki kontrolünden geçecek.
+- Soft delete kullanılacak.
+- Finans kayıtları fiziksel silinmeyecek.
+- Büyük refactor izinsiz yapılmayacak.
+- Her task küçük PR gibi uygulanacak.
+- Kod bittikten sonra test/lint çalıştırılacak.
+```
+
+Agent’a görevleri küçük ver:
+
+Yanlış prompt:
+
+```text
+Eventra'nın backendini yap.
+```
+
+Doğru prompt:
+
+```text
+FastAPI projesinde Organization, User, Role ve Permission modellerini oluştur.
+PostgreSQL için Alembic migration yaz.
+organization_id tabanlı tenant helper ekle.
+Basit seed script yaz.
+Testleri ekle.
+Var olan mimari dışına çıkma.
+```
+
+Sonra:
+
+```text
+Hall ve EventType CRUD endpointlerini ekle.
+Her endpoint organization scope ile çalışsın.
+EventType color, icon, default_duration, default_fields_json alanlarını içersin.
+Testleri ekle.
+```
+
+Sonra:
+
+```text
+Reservation modelini ekle.
+Status, payment_status, operation_status alanları enum olsun.
+Calendar endpointi tarih aralığına göre reservation döndürsün.
+Çakışma kontrolü ekle.
+```
+
+Bu şekilde yaptırırsan Codex/Antigravity altından kalkar. Tek parça ürün verirsen hatayı bulmak senin için daha zor olur.
+
+# Ben olsam nasıl başlardım?
+
+## Gün 1
+
+* repo aç
+* backend/frontend klasörleri
+* Docker Compose: PostgreSQL + Redis
+* FastAPI skeleton
+* SvelteKit skeleton
+* auth kararı
+* DB migration sistemi
+* AGENTS.md
+
+## Gün 2
+
+* Organization/User/Role/Permission
+* login
+* tenant seçimi
+* seed data
+
+## Gün 3
+
+* Venue/Hall/EventType
+* event type renkleri
+* settings ekranı
+
+## Gün 4-5
+
+* Customer
+* Reservation
+* Calendar endpoint
+* çakışma kontrolü
+
+## Gün 6-7
+
+* Svelte calendar UI
+* new reservation form
+* reservation detail
+
+## Gün 8
+
+* Payment
+* kapora/kalan bakiye
+* ödeme geçmişi
+
+## Gün 9
+
+* dashboard
+* yaklaşan organizasyonlar
+* kapora bekleyenler
+* ödeme bekleyenler
+
+## Gün 10
+
+* audit log
+* export
+* demo seed data
+* deployment
+
+2 haftada tam ürün değil ama **satış demosu + pilot çekirdeği** çıkar.
+
+# Frontend mi backend mi?
+
+Net cevap:
+
+**Önce model + API contract, sonra backend/frontend paralel vertical slice.**
+
+Sıra:
+
+```text
+1. ERD
+2. state machine
+3. API contract
+4. backend skeleton
+5. frontend skeleton
+6. reservation vertical slice
+7. ödeme vertical slice
+8. dashboard
+```
+
+Sadece backend yazarsan ürün soyut kalır. Sadece frontend yazarsan veri modeli patlar. Bu ürün için ikisini birlikte götürmek zorundasın.
+
+# Kritik karar
+
+İlk modülde şunlara girme:
+
+* WhatsApp parse
+* gerçek Signal
+* Flow board
+* AI
+* müşteri portalı full
+* Word template engine
+* gelişmiş rapor
+
+Ama bunların veri alanlarını düşün:
+
+```text
+operation_status
+event_type.default_checklist_json
+flex_start_rule
+internal_notes
+special_guest_notes
+assigned_owner_id
+```
+
+Bunları koyarsan sonra Flow’a geçerken sistem yıkılmaz.
+
+# Benim tavsiyem
+
+İskeleti sen kur. İlk 2-3 günü kendin yap veya agentla beraber çok yakından kontrol et.
+
+Özellikle şunları agent’a tamamen bırakma:
+
+* database model kararı
+* tenant sistemi
+* permission sistemi
+* status enumları
+* payment kayıt mantığı
+* reservation conflict logic
+
+CRUD, form, tablo, test, migration, UI component gibi işleri agent’a ver.
+
+Yani doğru kullanım:
+
+**Sen mimar. Agent uygulayıcı.**
+
+Tersi olursa ürün büyüdükçe kontrolü kaybedersin.
+
+[1]: https://developers.openai.com/codex/ide?utm_source=chatgpt.com "Codex IDE extension"
+[2]: https://antigravity.google/?utm_source=chatgpt.com "Google Antigravity"
