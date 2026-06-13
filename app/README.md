@@ -1,42 +1,30 @@
-# sv
+# Eventra — Ana Uygulama
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+SvelteKit 5 (Svelte runes), TypeScript. Port **5173**.
 
-## Creating a project
+## Başlatma
 
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
-
-```sh
-# recreate this project
-npx sv@0.16.1 create --template minimal --types ts --add prettier eslint vitest="usages:unit,component" playwright --install npm app
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+```bash
+npm install
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+## Ortam
 
-To create a production version of your app:
+`.env` dosyası (zaten varsa atla):
 
-```sh
-npm run build
+```
+VITE_API_URL=http://localhost:8000
 ```
 
-You can preview the production build with `npm run preview`.
+## Sayfalar
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+| Yol | Açıklama |
+|-----|----------|
+| `/login` | Giriş ekranı |
+| `/dashboard` | Özet, USD/EUR kur göstergesi |
+| `/calendar` | Etkinlik takvimi ve form |
+| `/customers` | Müşteri listesi |
+| `/venue` | Salon düzeni (SVG canvas) |
+| `/contracts` | Sözleşme şablonları ve oluşturma |
+| `/settings` | Salon ayarları, form alan yönetimi |

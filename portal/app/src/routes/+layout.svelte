@@ -4,21 +4,20 @@
 
 <svelte:head>
 	<title>Eventra – Müşteri Portali</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 </svelte:head>
 
-<div class="app">
-	{@render children()}
-</div>
+{@render children()}
 
 <style>
 	:global(*) { box-sizing: border-box; }
 	:global(body) {
 		margin: 0;
-		font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-		background: #0f172a;
+		font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+		background: #080e1c;
 		color: #f8fafc;
+		-webkit-font-smoothing: antialiased;
 	}
 	:global(input, select, textarea, button) { font: inherit; }
-
-	.app { min-height: 100vh; }
 </style>

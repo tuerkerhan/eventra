@@ -77,6 +77,16 @@ class SalonUserCreateIn(BaseModel):
 
 # ─── Settings ────────────────────────────────────────────────────────────────
 
+class UserPrefsOut(BaseModel):
+    ui_mode: str
+
+    model_config = {"from_attributes": True}
+
+
+class UserPrefsUpdate(BaseModel):
+    ui_mode: str | None = None
+
+
 class SalonUpdateIn(BaseModel):
     name: str | None = None
     address: str | None = None
@@ -431,3 +441,100 @@ class PortalSeatSubmit(BaseModel):
 
 class PortalFormSubmit(BaseModel):
     data: dict[str, Any]
+
+
+# ─── Event Form Field Defs ────────────────────────────────────────────────────
+
+class EventFormFieldDefIn(BaseModel):
+    key: str
+    label: str
+    field_type: str = "text"
+    options: list[str] = []
+    placeholder_tag: str = ""
+    is_required: bool = False
+    sort_order: int = 0
+
+
+class EventFormFieldDefUpdate(BaseModel):
+    label: str | None = None
+    is_visible: bool | None = None
+    is_required: bool | None = None
+    sort_order: int | None = None
+
+
+class EventFormFieldDefOut(BaseModel):
+    id: str
+    key: str
+    label: str
+    field_type: str
+    options: list[str]
+    placeholder_tag: str
+    is_visible: bool
+    is_required: bool
+    sort_order: int
+    is_builtin: bool
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Contract Templates ──────────────────────────────────────────────────────
+
+class ContractTemplateOut(BaseModel):
+    id: str
+    name: str
+    original_filename: str
+    file_type: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Expenses ────────────────────────────────────────────────────────────────
+
+class ExpenseIn(BaseModel):
+    title: str
+    amount: float
+    amount_type: str = "fixed"
+    currency: str = "TRY"
+    recurrence: str = "once"
+    custom_period_days: int | None = None
+    due_date: str
+    event_id: str | None = None
+    is_paid: bool = False
+    include_kdv: bool = False
+    note: str = ""
+
+
+class ExpenseUpdate(BaseModel):
+    title: str | None = None
+    amount: float | None = None
+    amount_type: str | None = None
+    currency: str | None = None
+    recurrence: str | None = None
+    custom_period_days: int | None = None
+    due_date: str | None = None
+    event_id: str | None = None
+    is_paid: bool | None = None
+    is_approved: bool | None = None
+    include_kdv: bool | None = None
+    note: str | None = None
+
+
+class ExpenseOut(BaseModel):
+    id: str
+    title: str
+    amount: float
+    amount_type: str
+    currency: str
+    recurrence: str
+    custom_period_days: int | None
+    due_date: str
+    event_id: str | None
+    event_title: str | None = None
+    is_paid: bool
+    is_approved: bool
+    include_kdv: bool
+    note: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

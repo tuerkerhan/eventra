@@ -13,6 +13,8 @@ from ..schemas import (
     PortalFormFieldOut,
     SalonOut,
     SalonUpdateIn,
+    UserPrefsOut,
+    UserPrefsUpdate,
 )
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -23,6 +25,20 @@ def _get_salon(user: SalonUser, db: Session) -> Salon:
     if not salon:
         raise HTTPException(status_code=404, detail="Salon bulunamadı")
     return salon
+
+
+@router.get("/me", response_model=UserPrefsOut)
+def get_prefs(user: SalonUser = Depends(get_current_user)):
+    return user
+
+
+@router.patch("/me", response_model=UserPrefsOut)
+def update_prefs(body: UserPrefsUpdate, user: SalonUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    if body.ui_mode is not None and body.ui_mode in ("full", "sade"):
+        user.ui_mode = body.ui_mode
+        db.commit()
+        db.refresh(user)
+    return user
 
 
 @router.get("/salon", response_model=SalonOut)

@@ -41,6 +41,9 @@ class Salon(Base):
     customer_field_defs = relationship("CustomerFieldDef", back_populates="salon", cascade="all, delete-orphan")
     portal_form_fields = relationship("PortalFormField", back_populates="salon", cascade="all, delete-orphan")
     org_type_fields = relationship("OrgTypeField", back_populates="salon", cascade="all, delete-orphan")
+    expenses = relationship("Expense", back_populates="salon", cascade="all, delete-orphan")
+    contract_templates = relationship("ContractTemplate", back_populates="salon", cascade="all, delete-orphan")
+    event_form_field_defs = relationship("EventFormFieldDef", back_populates="salon", cascade="all, delete-orphan")
 
 
 class SalonUser(Base):
@@ -52,6 +55,7 @@ class SalonUser(Base):
     hashed_password = Column(String, nullable=False)
     role = Column(String, default="staff")  # owner | staff
     is_active = Column(Boolean, default=True)
+    ui_mode = Column(String, default="full")   # full | sade
     created_at = Column(DateTime, default=datetime.utcnow)
 
     salon = relationship("Salon", back_populates="users")
@@ -247,6 +251,59 @@ class GuestSeating(Base):
 
     event = relationship("Event", back_populates="guest_seatings")
     table = relationship("VenueTable", back_populates="seatings")
+
+
+class EventFormFieldDef(Base):
+    """Global event form field definitions per salon. Controls which fields appear in the event form."""
+    __tablename__ = "event_form_field_defs"
+    id = Column(String, primary_key=True, default=_uuid)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    key = Column(String, nullable=False)           # matches Event column (builtins) or custom key
+    label = Column(String, nullable=False)
+    field_type = Column(String, default="text")    # text|number|date|time|textarea|select|checkbox
+    options = Column(JSON, default=list)
+    placeholder_tag = Column(String, default="")   # e.g. %gelin_damat%
+    is_visible = Column(Boolean, default=True)
+    is_required = Column(Boolean, default=False)
+    sort_order = Column(Integer, default=0)
+    is_builtin = Column(Boolean, default=False)    # True = standard event field, can hide but not delete
+
+    salon = relationship("Salon", back_populates="event_form_field_defs")
+
+
+class ContractTemplate(Base):
+    __tablename__ = "contract_templates"
+    id = Column(String, primary_key=True, default=_uuid)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    name = Column(String, nullable=False)
+    original_filename = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)   # docx | odt
+    file_path = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    salon = relationship("Salon", back_populates="contract_templates")
+
+
+class Expense(Base):
+    __tablename__ = "expenses"
+    id = Column(String, primary_key=True, default=_uuid)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    title = Column(String, nullable=False)
+    amount = Column(Float, nullable=False, default=0)
+    amount_type = Column(String, default="fixed")       # fixed | variable
+    currency = Column(String, default="TRY")            # TRY | USD | EUR
+    recurrence = Column(String, default="once")         # once | weekly | monthly | yearly | custom
+    custom_period_days = Column(Integer, nullable=True)
+    due_date = Column(String, nullable=False)
+    event_id = Column(String, ForeignKey("events.id"), nullable=True)
+    is_paid = Column(Boolean, default=False)
+    is_approved = Column(Boolean, default=True)
+    include_kdv = Column(Boolean, default=False)
+    note = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    salon = relationship("Salon", back_populates="expenses")
+    event = relationship("Event")
 
 
 class PortalFormField(Base):

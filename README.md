@@ -11,8 +11,8 @@ Düğün salonu yönetim sistemi. FastAPI backend + SvelteKit frontend'ler.
 | Backend API | http://localhost:8000 | 8000 |
 | API Dokümantasyonu | http://localhost:8000/docs | 8000 |
 | Ana Uygulama | http://localhost:5173 | 5173 |
-| Admin Paneli | http://localhost:5174 | 5174 |
-| Misafir Portalı | http://localhost:5175 | 5175 |
+| Misafir Portalı | http://localhost:5174 | 5174 |
+| Admin Paneli | http://localhost:5175 | 5175 |
 
 ---
 
@@ -57,9 +57,9 @@ uvicorn app.main:app --reload --port 8000
 Her biri için ayrı terminal:
 
 ```bash
-cd app && npm install && npm run dev -- --port 5173
-cd admin/app && npm install && npm run dev -- --port 5174
-cd portal/app && npm install && npm run dev -- --port 5175
+cd app && npm install && npm run dev                  # port 5173
+cd portal/app && npm install && npm run dev          # port 5174
+cd admin/app && npm install && npm run dev           # port 5175
 ```
 
 ---
@@ -73,13 +73,13 @@ Zaten kuruluysa (venv + node_modules mevcut):
 cd backend && source venv/bin/activate && uvicorn app.main:app --reload --port 8000
 
 # Terminal 2 — Ana Uygulama
-cd app && npm run dev -- --port 5173
+cd app && npm run dev
 
-# Terminal 3 — Admin Paneli
-cd admin/app && npm run dev -- --port 5174
+# Terminal 3 — Misafir Portalı
+cd portal/app && npm run dev
 
-# Terminal 4 — Misafir Portalı
-cd portal/app && npm run dev -- --port 5175
+# Terminal 4 — Admin Paneli
+cd admin/app && npm run dev
 ```
 
 ---
@@ -160,18 +160,50 @@ Giriş adresi: http://localhost:5173/login
 
 ---
 
+## Özellikler
+
+### Ana Uygulama (port 5173)
+- **Dashboard** — USD/EUR → TRY kur göstergesi (Frankfurter API), gelir özeti
+- **Takvim** — etkinlik yönetimi, özelleştirilebilir form alanları (görünürlük kontrolü + sözleşme etiketleri)
+- **Randevular** — müşteri yönetimi, özel alan tanımları
+- **Salon Düzeni** — masa/koltuk düzeni tasarımı, SVG canvas
+- **Sözleşmeler** — .docx/.odt şablon yükleme, `%etiket%` ile otomatik doldurma ve indirme
+- **Ayarlar** — salon bilgileri, etkinlik formu alan yönetimi, sözleşme etiket eşleşmeleri
+- **UI Modu** — Tam mod (ikonlar + crown animasyonu) / Sade mod (kompakt, ikonsuz); tercih backend'e kaydedilir
+
+### Misafir Portalı (port 5174)
+- Token tabanlı, her etkinlik için benzersiz URL
+- Tek instance tüm salonlara hizmet eder (çok kiracılı)
+- Organizasyon formu doldurma, salon oturma düzeni oluşturma
+
+### Admin Paneli (port 5175)
+- Salon oluşturma/yönetimi
+
+---
+
 ## Proje Yapısı
 
 ```
 eventra/
 ├── backend/          # FastAPI + PostgreSQL
 │   ├── app/
-│   │   ├── routers/  # auth, events, customers, venue, portal, settings, admin
+│   │   ├── routers/
+│   │   │   ├── auth.py            # JWT giriş
+│   │   │   ├── events.py          # Etkinlik CRUD
+│   │   │   ├── customers.py       # Müşteri CRUD
+│   │   │   ├── contracts.py       # Şablon yükleme, sözleşme oluşturma
+│   │   │   ├── event_form_fields.py  # Etkinlik form alan tanımları
+│   │   │   ├── expenses.py        # Gider yönetimi
+│   │   │   ├── venue.py           # Salon düzeni
+│   │   │   ├── portal.py          # Misafir portalı endpoint'leri
+│   │   │   ├── settings.py        # Salon ayarları, kullanıcı tercihleri
+│   │   │   └── admin_router.py    # Admin işlemleri
 │   │   ├── models.py
 │   │   ├── schemas.py
 │   │   └── main.py
+│   ├── uploads/      # Yüklenen sözleşme şablonları (.docx / .odt)
 │   └── requirements.txt
 ├── app/              # Ana uygulama (SvelteKit) — port 5173
-├── admin/app/        # Admin paneli (SvelteKit) — port 5174
-└── portal/app/       # Misafir portalı (SvelteKit) — port 5175
+├── portal/app/       # Misafir portalı (SvelteKit) — port 5174
+└── admin/app/        # Admin paneli (SvelteKit) — port 5175
 ```

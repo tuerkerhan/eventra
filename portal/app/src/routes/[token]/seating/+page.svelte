@@ -144,8 +144,11 @@
 
 <main class="seating-shell" class:print-mode={printMode}>
 	<header class="seating-header no-print">
-		<a class="back-link" href="/{token}">← Portale Dön</a>
-		<h1>Oturma Düzeni</h1>
+		<a class="back-link" href="/{token}">
+			<img src="/ikon.png" alt="" class="back-logo" />
+			← Portale Dön
+		</a>
+		<h1>🪑 Oturma Düzeni</h1>
 		<div class="header-actions">
 			<button type="button" onclick={saveToServer} disabled={saving} class="save-btn" class:saved>
 				{saved ? '✓ Kaydedildi' : saving ? 'Kaydediliyor…' : 'Kaydet'}
@@ -258,12 +261,23 @@
 </main>
 
 <style>
-	.seating-shell { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 1rem; }
+	.seating-shell {
+		max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem;
+		display: flex; flex-direction: column; gap: 1rem;
+		min-height: 100vh;
+		background:
+			radial-gradient(ellipse 80% 40% at 50% -5%, rgba(197,155,49,0.1) 0%, transparent 60%),
+			linear-gradient(160deg, #080e1c 0%, #0d1526 100%);
+	}
 
 	.seating-header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-	h1 { margin: 0; font-size: 1.6rem; flex: 1; }
+	h1 { margin: 0; font-size: 1.4rem; flex: 1; }
 
-	.back-link { color: #c59b31; text-decoration: none; font-weight: 800; white-space: nowrap; }
+	.back-link {
+		display: flex; align-items: center; gap: 0.5rem;
+		color: #c59b31; text-decoration: none; font-weight: 800; white-space: nowrap;
+	}
+	.back-logo { width: 26px; height: 26px; object-fit: contain; filter: drop-shadow(0 0 6px rgba(197,155,49,0.5)); }
 	.header-actions { display: flex; gap: 0.65rem; }
 
 	.save-btn {

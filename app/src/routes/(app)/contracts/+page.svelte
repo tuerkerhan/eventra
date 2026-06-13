@@ -1,502 +1,493 @@
 <script lang="ts">
-	interface Template {
+	import { onMount } from 'svelte';
+	import { api, type EventApi, type SalonApi, getToken } from '$lib/api';
+
+	const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+	interface ContractTemplate {
 		id: string;
 		name: string;
-		body: string;
+		original_filename: string;
+		file_type: 'docx' | 'odt';
+		created_at: string;
 	}
 
-	interface MockEvent {
-		id: string;
-		title: string;
-		date: string;
-		fullName: string;
-		brideGroom: string;
-		start: string;
-		end: string;
-		type: string;
-		guestCount: number;
-		total: number;
-		kapora: number;
-		paid: number;
-		address: string;
-		region: string;
-		mobilePhone: string;
-		tcNo: string;
-		staff: string;
-		note: string;
-		contractDate: string;
-		reservationStatus: string;
-	}
+	// ─── State ────────────────────────────────────────────────────────────────
+	let events = $state<EventApi[]>([]);
+	let salon = $state<SalonApi | null>(null);
+	let templates = $state<ContractTemplate[]>([]);
+	let loading = $state(true);
 
-	// Örnek şablonlar
-	let templates = $state<Template[]>([
-		{
-			id: 't1',
-			name: 'Standart Düğün Sözleşmesi',
-			body: `DAVET VE ORGANİZASYON SÖZLEŞMESİ
-Sözleşme No: %sozlesme_no%
-Sözleşme Tarihi: %sozlesme_tarihi%
-
-MÜŞTERİ BİLGİLERİ
-Ad Soyad       : %isim%
-Gelin & Damat  : %gelin_damat%
-T.C. Kimlik No : %tc_no%
-Telefon        : %telefon%
-Bölge          : %bolge%
-Adres          : %adres%
-
-ETKİNLİK BİLGİLERİ
-Tarihi         : %tarih%
-Saati          : %baslama_saati% – %bitis_saati%
-Niteliği       : %tip%
-Durum          : %rezervasyon_durumu%
-Davetli Sayısı : %davetli_sayisi% kişi
-
-ÜCRET BİLGİLERİ
-Toplam Ücret   : %toplam_ucret%
-Kapora         : %kapora%
-Ödenen         : %odenen%
-Kalan          : %kalan%
-
-PERSONEL        : %personel%
-
-NOTLAR
-%notlar%
-
-Taraflar yukarıdaki koşulları kabul etmiştir.
-
-Salon Yetkilisi: ___________________    Müşteri: ___________________`
-		}
-	]);
-
-	// Mock events (gerçek uygulamada API'dan gelir)
-	const mockEvents: MockEvent[] = [
-		{
-			id: '2962', title: 'Ayşe & Ahmet', date: '2026-06-18', contractDate: '2026-06-08',
-			fullName: 'Ayşe Yılmaz', brideGroom: 'Ayşe Yılmaz & Ahmet Demir',
-			start: '19:00', end: '23:30', type: 'Düğün', guestCount: 420,
-			total: 150000, kapora: 25000, paid: 25000,
-			address: 'İnci Davet Salonu, İstanbul', region: 'Üsküdar',
-			mobilePhone: '0532 000 00 00', tcNo: '12345678910',
-			staff: 'Elif, Mert, Can',
-			note: 'Menü B, ekstra fotoğrafçı ve sahne ışığı istendi.',
-			reservationStatus: 'Kesin Rezervasyon'
-		},
-		{
-			id: '2963', title: 'Burcu & Cem', date: '2026-06-25', contractDate: '2026-06-10',
-			fullName: 'Burcu Kaya', brideGroom: 'Burcu Kaya & Cem Arslan',
-			start: '20:00', end: '00:00', type: 'Nişan', guestCount: 180,
-			total: 85000, kapora: 15000, paid: 50000,
-			address: 'İnci Davet Teras Salonu', region: 'Kadıköy',
-			mobilePhone: '0544 111 22 33', tcNo: '',
-			staff: 'Mert, Seda', note: 'Pasta dışarıdan gelecek.',
-			reservationStatus: 'Kesin Rezervasyon'
-		},
-		{
-			id: '2964', title: 'Derya & Emre', date: '2026-07-02', contractDate: '2026-06-12',
-			fullName: 'Derya Aksoy', brideGroom: 'Derya Aksoy & Emre Çelik',
-			start: '14:00', end: '18:00', type: 'Kına', guestCount: 140,
-			total: 60000, kapora: 10000, paid: 60000,
-			address: 'İnci Davet Salon 2', region: 'Ataşehir',
-			mobilePhone: '0555 222 33 44', tcNo: '',
-			staff: 'Seda, Can', note: 'Kına tahtı ve giriş müziği hazır.',
-			reservationStatus: 'Kesin Rezervasyon'
-		}
-	];
-
-	// UI state
 	let activeTab = $state<'templates' | 'generate'>('templates');
 	let selectedTemplateId = $state<string | null>(null);
 	let selectedEventId = $state<string | null>(null);
-	let preview = $state('');
-	let editingTemplate = $state<Template | null>(null);
-	let newName = $state('');
-	let newBody = $state('');
-	let showNewForm = $state(false);
+
+	// Upload form
+	let uploadFile = $state<File | null>(null);
+	let uploadName = $state('');
+	let uploading = $state(false);
 	let uploadError = $state('');
 
-	const formatMoney = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
-	const formatDate = (d: string) => {
-		if (!d) return '';
-		try { return new Date(d + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }); }
-		catch { return d; }
-	};
+	// Generate
+	let generating = $state(false);
+	let genError = $state('');
+	let genSuccess = $state('');
 
-	const PLACEHOLDERS: { key: string; label: string; example: string }[] = [
-		{ key: '%isim%',             label: 'Müşteri adı soyadı',  example: 'Ayşe Yılmaz' },
-		{ key: '%gelin_damat%',      label: 'Gelin & Damat',       example: 'Ayşe Yılmaz & Ahmet Demir' },
-		{ key: '%tc_no%',            label: 'T.C. / Vergi No',     example: '12345678910' },
-		{ key: '%telefon%',          label: 'Telefon',             example: '0532 000 00 00' },
-		{ key: '%tarih%',            label: 'Etkinlik tarihi',     example: '18 Haziran 2026' },
-		{ key: '%baslama_saati%',    label: 'Başlama saati',       example: '19:00' },
-		{ key: '%bitis_saati%',      label: 'Bitiş saati',         example: '23:30' },
-		{ key: '%tip%',              label: 'Etkinlik tipi',       example: 'Düğün' },
-		{ key: '%rezervasyon_durumu%', label: 'Rezervasyon durumu', example: 'Kesin Rezervasyon' },
-		{ key: '%davetli_sayisi%',   label: 'Davetli sayısı',      example: '420' },
-		{ key: '%adres%',            label: 'Adres',               example: 'İnci Davet Salonu' },
-		{ key: '%bolge%',            label: 'Bölge',               example: 'Üsküdar' },
-		{ key: '%toplam_ucret%',     label: 'Toplam ücret',        example: '₺150.000' },
-		{ key: '%kapora%',           label: 'Kapora',              example: '₺25.000' },
-		{ key: '%odenen%',           label: 'Ödenen toplam',       example: '₺25.000' },
-		{ key: '%kalan%',            label: 'Kalan ücret',         example: '₺125.000' },
-		{ key: '%sozlesme_no%',      label: 'Sözleşme no',         example: '2962' },
-		{ key: '%sozlesme_tarihi%',  label: 'Sözleşme tarihi',     example: '8 Haziran 2026' },
-		{ key: '%personel%',         label: 'Personel',            example: 'Elif, Mert' },
-		{ key: '%notlar%',           label: 'Notlar',              example: 'Menü B istendi.' },
-		{ key: '%gelin_damat%',      label: 'Gelin & Damat',       example: 'Ad & Ad' }
-	];
+	const selectedTemplate = $derived(templates.find(t => t.id === selectedTemplateId) ?? null);
+	const selectedEvent = $derived(events.find(e => e.id === selectedEventId) ?? null);
 
-	const fillTemplate = (body: string, ev: MockEvent): string => {
-		const map: Record<string, string> = {
-			'%isim%':               ev.fullName,
-			'%gelin_damat%':        ev.brideGroom,
-			'%tc_no%':              ev.tcNo,
-			'%telefon%':            ev.mobilePhone,
-			'%tarih%':              formatDate(ev.date),
-			'%baslama_saati%':      ev.start,
-			'%bitis_saati%':        ev.end,
-			'%tip%':                ev.type,
-			'%rezervasyon_durumu%': ev.reservationStatus,
-			'%davetli_sayisi%':     String(ev.guestCount),
-			'%adres%':              ev.address,
-			'%bolge%':              ev.region,
-			'%toplam_ucret%':       formatMoney(ev.total),
-			'%kapora%':             formatMoney(ev.kapora),
-			'%odened%':             formatMoney(ev.paid),
-			'%odenen%':             formatMoney(ev.paid),
-			'%kalan%':              formatMoney(ev.total - ev.paid),
-			'%sozlesme_no%':        ev.id,
-			'%sozlesme_tarihi%':    formatDate(ev.contractDate),
-			'%personel%':           ev.staff,
-			'%notlar%':             ev.note || '—'
-		};
-		return Object.entries(map).reduce((text, [ph, val]) => text.replaceAll(ph, val), body);
-	};
+	onMount(async () => {
+		try {
+			const [evs, s] = await Promise.all([
+				api.get<EventApi[]>('/events'),
+				api.get<SalonApi>('/settings/salon')
+			]);
+			events = evs;
+			salon = s;
+			await loadTemplates();
+		} catch {}
+		loading = false;
+	});
 
-	const generatePreview = () => {
-		const tmpl = templates.find(t => t.id === selectedTemplateId);
-		const ev = mockEvents.find(e => e.id === selectedEventId);
-		if (!tmpl || !ev) { preview = ''; return; }
-		preview = fillTemplate(tmpl.body, ev);
-	};
+	async function loadTemplates() {
+		templates = await api.get<ContractTemplate[]>('/contracts/templates');
+	}
 
-	$effect(() => { generatePreview(); });
-
-	const downloadContract = () => {
-		if (!preview) return;
-		const ev = mockEvents.find(e => e.id === selectedEventId);
-		const tmpl = templates.find(t => t.id === selectedTemplateId);
-		const blob = new Blob([preview], { type: 'text/plain;charset=utf-8' });
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = `sozlesme_${ev?.id ?? 'draft'}_${tmpl?.name ?? 'sözleşme'}.txt`.replace(/\s+/g, '_');
-		a.click();
-		URL.revokeObjectURL(url);
-	};
-
-	const addTemplate = () => {
-		if (!newName.trim() || !newBody.trim()) return;
-		templates = [...templates, { id: String(Math.random()).slice(2), name: newName.trim(), body: newBody.trim() }];
-		newName = '';
-		newBody = '';
-		showNewForm = false;
-	};
-
-	const deleteTemplate = (id: string) => {
-		if (!confirm('Bu şablonu silmek istediğinizden emin misiniz?')) return;
-		templates = templates.filter(t => t.id !== id);
-		if (selectedTemplateId === id) selectedTemplateId = null;
-	};
-
-	const startEdit = (tmpl: Template) => {
-		editingTemplate = { ...tmpl };
-	};
-
-	const saveEdit = () => {
-		if (!editingTemplate) return;
-		templates = templates.map(t => t.id === editingTemplate!.id ? { ...editingTemplate! } : t);
-		editingTemplate = null;
-	};
-
-	const handleFileUpload = (e: Event) => {
+	// ─── Upload ───────────────────────────────────────────────────────────────
+	function onFileChange(e: Event) {
 		uploadError = '';
 		const input = e.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		if (!file) return;
-		if (!file.name.endsWith('.txt') && !file.name.endsWith('.md')) {
-			uploadError = 'Yalnızca .txt veya .md dosyaları desteklenir. (.docx için önce metni kopyalayın)';
+		const ext = file.name.split('.').pop()?.toLowerCase();
+		if (ext !== 'docx' && ext !== 'odt') {
+			uploadError = 'Yalnızca .docx ve .odt dosyaları desteklenir.';
+			uploadFile = null;
 			return;
 		}
-		const reader = new FileReader();
-		reader.onload = (ev) => {
-			newBody = ev.target?.result as string ?? '';
-			newName = file.name.replace(/\.[^.]+$/, '');
-		};
-		reader.readAsText(file, 'UTF-8');
-	};
+		uploadFile = file;
+		if (!uploadName.trim()) uploadName = file.name.replace(/\.[^.]+$/, '');
+	}
 
-	const copyPlaceholder = (key: string) => {
+	async function uploadTemplate() {
+		if (!uploadFile) return;
+		uploading = true;
+		uploadError = '';
+		try {
+			const form = new FormData();
+			form.append('file', uploadFile);
+			form.append('name', uploadName.trim() || uploadFile.name);
+			const res = await fetch(`${API}/contracts/templates/upload?name=${encodeURIComponent(uploadName.trim())}`, {
+				method: 'POST',
+				headers: { Authorization: `Bearer ${getToken()}` },
+				body: form
+			});
+			if (!res.ok) {
+				const d = await res.json().catch(() => ({}));
+				uploadError = d.detail ?? 'Yükleme başarısız';
+			} else {
+				uploadFile = null;
+				uploadName = '';
+				await loadTemplates();
+			}
+		} catch {
+			uploadError = 'Sunucuya bağlanılamadı';
+		} finally {
+			uploading = false;
+		}
+	}
+
+	async function deleteTemplate(id: string, name: string) {
+		if (!confirm(`"${name}" şablonu silinsin mi?`)) return;
+		await api.del(`/contracts/templates/${id}`);
+		await loadTemplates();
+		if (selectedTemplateId === id) selectedTemplateId = null;
+	}
+
+	// ─── Generate ─────────────────────────────────────────────────────────────
+	async function generateContract() {
+		if (!selectedEventId || !selectedTemplateId) return;
+		generating = true;
+		genError = '';
+		genSuccess = '';
+		try {
+			const res = await fetch(
+				`${API}/contracts/generate/${selectedEventId}?template_id=${selectedTemplateId}`,
+				{ headers: { Authorization: `Bearer ${getToken()}` } }
+			);
+			if (!res.ok) {
+				const d = await res.json().catch(() => ({}));
+				genError = d.detail ?? 'Sözleşme oluşturulamadı';
+				return;
+			}
+			const blob = await res.blob();
+			const url = URL.createObjectURL(blob);
+			const disp = res.headers.get('Content-Disposition') ?? '';
+			const match = disp.match(/filename="([^"]+)"/);
+			const filename = match ? match[1] : `sozlesme.${selectedTemplate?.file_type}`;
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = filename;
+			a.click();
+			URL.revokeObjectURL(url);
+			genSuccess = `"${filename}" indirildi.`;
+		} catch {
+			genError = 'Sunucuya bağlanılamadı';
+		} finally {
+			generating = false;
+		}
+	}
+
+	// ─── Helpers ──────────────────────────────────────────────────────────────
+	const fmtDate = (s: string) => s ? new Date(s + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+	const fmtMoney = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
+	const fileIcon = (t: string) => t === 'docx' ? '📝' : '📄';
+
+	const PLACEHOLDERS = [
+		{ key: '%baslik%',            label: 'Etkinlik başlığı' },
+		{ key: '%isim%',              label: 'Müşteri adı soyadı' },
+		{ key: '%gelin_damat%',       label: 'Gelin & Damat' },
+		{ key: '%tc_no%',             label: 'T.C. / Vergi No' },
+		{ key: '%telefon%',           label: 'Telefon' },
+		{ key: '%tarih%',             label: 'Etkinlik tarihi' },
+		{ key: '%sozlesme_tarihi%',   label: 'Sözleşme tarihi' },
+		{ key: '%baslama_saati%',     label: 'Başlama saati' },
+		{ key: '%bitis_saati%',       label: 'Bitiş saati' },
+		{ key: '%tip%',               label: 'Etkinlik tipi' },
+		{ key: '%rezervasyon_durumu%',label: 'Rezervasyon durumu' },
+		{ key: '%davetli_sayisi%',    label: 'Davetli sayısı' },
+		{ key: '%adres%',             label: 'Adres' },
+		{ key: '%bolge%',             label: 'Bölge' },
+		{ key: '%toplam_ucret%',      label: 'Toplam ücret' },
+		{ key: '%kapora%',            label: 'Kapora' },
+		{ key: '%odenen%',            label: 'Ödenen toplam' },
+		{ key: '%kalan%',             label: 'Kalan ücret' },
+		{ key: '%sozlesme_no%',       label: 'Sözleşme no (otomatik)' },
+		{ key: '%personel%',          label: 'Personel' },
+		{ key: '%notlar%',            label: 'Notlar' },
+		{ key: '%salon_adi%',         label: 'Salon adı' },
+		{ key: '%salon_adresi%',      label: 'Salon adresi' },
+		{ key: '%kdv_orani%',         label: 'KDV oranı' },
+	];
+
+	function copyPh(key: string) {
 		navigator.clipboard.writeText(key).catch(() => {});
-	};
+	}
 </script>
 
 <section class="page-shell">
 	<div class="page-heading">
 		<div>
 			<p class="eyebrow">Sözleşmeler</p>
-			<h1>Şablon & Sözleşme Oluşturucu</h1>
+			<h1>Word & ODT Sözleşme Sistemi</h1>
+			<p class="sub">Şablonuna placeholder yaz, sistem müşteriye özel doldurur ve indirir.</p>
 		</div>
-		<div class="tab-switch">
-			<button class:active={activeTab === 'templates'} type="button" onclick={() => (activeTab = 'templates')}>Şablonlar</button>
-			<button class:active={activeTab === 'generate'}  type="button" onclick={() => (activeTab = 'generate')}>Sözleşme Oluştur</button>
+		<div class="tab-bar">
+			<button class:active={activeTab === 'templates'} onclick={() => (activeTab = 'templates')} type="button">Şablonlar</button>
+			<button class:active={activeTab === 'generate'}  onclick={() => (activeTab = 'generate')}  type="button">Sözleşme Oluştur</button>
 		</div>
 	</div>
 
 	{#if activeTab === 'templates'}
-		<!-- ── Şablon yönetimi ─────────────────────────────────── -->
-		<div class="templates-layout">
-			<div class="template-list-col">
-				<div class="col-head">
-					<h2>Şablonlarım</h2>
-					<button class="sm-btn" type="button" onclick={() => (showNewForm = !showNewForm)}>
-						{showNewForm ? '✕ Kapat' : '+ Yeni Şablon'}
-					</button>
-				</div>
+	<!-- ── Şablon yönetimi ──────────────────────────────────────────────── -->
+	<div class="two-col">
 
-				{#if showNewForm}
-					<div class="new-template-form">
-						<label>
-							<span>Şablon Adı</span>
-							<input bind:value={newName} placeholder="Örn: Düğün Sözleşmesi" />
-						</label>
-						<label>
-							<span>Dosya Yükle (.txt)</span>
-							<input type="file" accept=".txt,.md" onchange={handleFileUpload} />
-						</label>
-						{#if uploadError}<p class="upload-error">{uploadError}</p>{/if}
-						<label>
-							<span>veya Şablon Metni Yapıştır <small>(placeholder: %isim%, %tarih% …)</small></span>
-							<textarea rows="10" bind:value={newBody} placeholder="Sayın %isim%,&#10;%tarih% tarihinde…"></textarea>
-						</label>
-						<div class="form-actions">
-							<button class="primary-btn" type="button" onclick={addTemplate} disabled={!newName.trim() || !newBody.trim()}>Kaydet</button>
-							<button class="ghost-btn" type="button" onclick={() => (showNewForm = false)}>İptal</button>
-						</div>
-					</div>
+		<!-- Sol: Yükleme + Liste -->
+		<div class="col-left">
+
+			<!-- Upload -->
+			<div class="panel upload-panel">
+				<h2>Şablon Yükle</h2>
+				<p class="hint">Word (.docx) veya LibreOffice (.odt) dosyana placeholder etiketlerini yaz, yükle.</p>
+
+				<label class="file-drop" class:has-file={!!uploadFile}>
+					<input type="file" accept=".docx,.odt" onchange={onFileChange} class="file-input" />
+					{#if uploadFile}
+						<span class="file-icon">{fileIcon(uploadFile.name.split('.').pop() ?? '')}</span>
+						<span class="file-name">{uploadFile.name}</span>
+						<span class="file-size">{(uploadFile.size / 1024).toFixed(0)} KB</span>
+					{:else}
+						<span class="drop-icon">📁</span>
+						<span class="drop-text">Tıkla veya sürükle</span>
+						<span class="drop-hint">.docx · .odt</span>
+					{/if}
+				</label>
+
+				{#if uploadFile}
+					<label class="field-label">
+						<span>Şablon Adı</span>
+						<input bind:value={uploadName} placeholder="Örn: Düğün Sözleşmesi" />
+					</label>
 				{/if}
 
-				<div class="template-cards">
-					{#each templates as tmpl}
-						<div class="template-card" class:selected={selectedTemplateId === tmpl.id}>
-							<button class="tmpl-name-btn" type="button" onclick={() => (selectedTemplateId = tmpl.id === selectedTemplateId ? null : tmpl.id)}>
-								<span class="tmpl-icon">📄</span>
-								<span>{tmpl.name}</span>
-							</button>
-							<div class="tmpl-actions">
-								<button class="icon-btn" type="button" onclick={() => startEdit(tmpl)} title="Düzenle">✏️</button>
-								<button class="icon-btn danger" type="button" onclick={() => deleteTemplate(tmpl.id)} title="Sil">🗑</button>
-							</div>
-						</div>
-					{/each}
-					{#if templates.length === 0}
-						<p class="empty-msg">Henüz şablon yok. "Yeni Şablon" ile ekleyin.</p>
-					{/if}
-				</div>
+				{#if uploadError}<p class="error-msg">{uploadError}</p>{/if}
+
+				<button class="primary-btn" type="button" onclick={uploadTemplate} disabled={!uploadFile || uploading}>
+					{uploading ? 'Yükleniyor…' : 'Şablonu Yükle'}
+				</button>
 			</div>
 
-			<div class="template-detail-col">
-				{#if editingTemplate}
-					<div class="panel">
-						<div class="col-head">
-							<h2>Şablonu Düzenle</h2>
-							<div style="display:flex;gap:0.5rem">
-								<button class="primary-btn" type="button" onclick={saveEdit}>Kaydet</button>
-								<button class="ghost-btn" type="button" onclick={() => (editingTemplate = null)}>İptal</button>
-							</div>
-						</div>
-						<label><span>Ad</span><input bind:value={editingTemplate.name} /></label>
-						<label><span>Şablon Metni</span><textarea rows="22" bind:value={editingTemplate.body}></textarea></label>
-					</div>
-				{:else if selectedTemplateId}
-					{@const tmpl = templates.find(t => t.id === selectedTemplateId)!}
-					<div class="panel">
-						<div class="col-head">
-							<h2>{tmpl.name}</h2>
-							<button class="sm-btn" type="button" onclick={() => startEdit(tmpl)}>✏️ Düzenle</button>
-						</div>
-						<pre class="template-preview">{tmpl.body}</pre>
-					</div>
+			<!-- Template list -->
+			<div class="panel">
+				<h2>Yüklü Şablonlar <span class="count">{templates.length}</span></h2>
+				{#if templates.length === 0}
+					<p class="empty">Henüz şablon yok.</p>
 				{:else}
-					<div class="panel placeholder-panel">
-						<h2>Placeholder Listesi</h2>
-						<p class="sub">Şablon metnine bu etiketleri yaz, sistem otomatik doldurur. Tıkla → kopyala.</p>
-						<div class="ph-grid">
-							{#each PLACEHOLDERS as ph}
-								<button class="ph-chip" type="button" onclick={() => copyPlaceholder(ph.key)} title="Kopyala: {ph.key}">
-									<code>{ph.key}</code>
-									<span>{ph.label}</span>
+					<div class="tmpl-list">
+						{#each templates as t}
+							<div class="tmpl-row" class:selected={selectedTemplateId === t.id}>
+								<button class="tmpl-btn" type="button" onclick={() => (selectedTemplateId = selectedTemplateId === t.id ? null : t.id)}>
+									<span class="tmpl-icon">{fileIcon(t.file_type)}</span>
+									<div class="tmpl-info">
+										<strong>{t.name}</strong>
+										<span>{t.original_filename} · {new Date(t.created_at).toLocaleDateString('tr-TR')}</span>
+									</div>
+									<span class="ext-badge {t.file_type}">.{t.file_type}</span>
 								</button>
-							{/each}
-						</div>
+								<button class="del-btn" type="button" onclick={() => deleteTemplate(t.id, t.name)} title="Sil">✕</button>
+							</div>
+						{/each}
 					</div>
 				{/if}
 			</div>
 		</div>
+
+		<!-- Sağ: Placeholder referans -->
+		<div class="col-right panel ph-panel">
+			<h2>Placeholder Referansı</h2>
+			<p class="hint">Bu etiketleri Word/ODT şablonuna birebir yaz. Sözleşme oluşturulurken sistem otomatik doldurur. Tıkla → kopyala.</p>
+
+			<div class="ph-grid">
+				{#each PLACEHOLDERS as ph}
+					<button class="ph-chip" type="button" onclick={() => copyPh(ph.key)} title="Kopyala">
+						<code>{ph.key}</code>
+						<span>{ph.label}</span>
+					</button>
+				{/each}
+			</div>
+
+			<div class="ph-note">
+				<strong>Nasıl çalışır?</strong>
+				<ol>
+					<li>Word veya LibreOffice'te sözleşme şablonunu oluştur.</li>
+					<li>Müşteriye özel alanların yerine yukarıdaki etiketleri yaz.<br><em>Örn: "Sayın <code>%isim%</code>,"</em></li>
+					<li>Dosyayı <code>.docx</code> veya <code>.odt</code> olarak kaydet.</li>
+					<li>Sol panelden yükle, ardından "Sözleşme Oluştur" sekmesinden indir.</li>
+				</ol>
+			</div>
+		</div>
+	</div>
 
 	{:else}
-		<!-- ── Sözleşme oluşturucu ─────────────────────────────── -->
-		<div class="generate-layout">
-			<aside class="generate-sidebar">
-				<div class="panel">
-					<h2>1 — Davet Seç</h2>
-					<div class="event-list">
-						{#each mockEvents as ev}
-							<button
-								class="event-item"
-								class:selected={selectedEventId === ev.id}
-								type="button"
-								onclick={() => (selectedEventId = ev.id)}
-							>
-								<strong>{ev.title}</strong>
-								<span>{ev.date} · {ev.type}</span>
-							</button>
-						{/each}
-					</div>
-				</div>
+	<!-- ── Sözleşme oluştur ─────────────────────────────────────────────── -->
+	<div class="generate-layout">
 
-				<div class="panel">
-					<h2>2 — Şablon Seç</h2>
-					<div class="event-list">
-						{#each templates as tmpl}
-							<button
-								class="event-item"
-								class:selected={selectedTemplateId === tmpl.id}
-								type="button"
-								onclick={() => (selectedTemplateId = tmpl.id)}
-							>
-								<strong>{tmpl.name}</strong>
-							</button>
-						{/each}
-						{#if templates.length === 0}
-							<p class="empty-msg">Önce "Şablonlar" sekmesinden şablon ekleyin.</p>
-						{/if}
-					</div>
-				</div>
-
-				<button
-					class="download-btn"
-					type="button"
-					onclick={downloadContract}
-					disabled={!preview}
-				>
-					⬇ Sözleşmeyi İndir (.txt)
-				</button>
-			</aside>
-
-			<div class="preview-col panel">
-				<div class="col-head">
-					<h2>Önizleme</h2>
-					{#if preview}
-						<button class="sm-btn" type="button" onclick={downloadContract}>⬇ İndir</button>
-					{/if}
-				</div>
-				{#if preview}
-					<pre class="contract-preview">{preview}</pre>
+		<!-- Sidebar -->
+		<aside class="gen-sidebar">
+			<div class="panel">
+				<h2>1 — Davet Seç</h2>
+				{#if loading}
+					<p class="hint">Yükleniyor…</p>
+				{:else if events.length === 0}
+					<p class="empty">Henüz etkinlik yok.</p>
 				{:else}
-					<div class="preview-empty">
-						<p>Davet ve şablon seçince sözleşme burada görünür.</p>
-						<p class="sub">Doldurulmuş alanlar otomatik yerleşir, ardından indirebilirsiniz.</p>
+					<div class="event-list">
+						{#each events as ev}
+							<button class="ev-item" class:selected={selectedEventId === ev.id}
+								type="button" onclick={() => (selectedEventId = ev.id)}>
+								<strong>{ev.title}</strong>
+								<span>{ev.event_date} · {ev.guest_count} kişi</span>
+							</button>
+						{/each}
 					</div>
 				{/if}
 			</div>
+
+			<div class="panel">
+				<h2>2 — Şablon Seç</h2>
+				{#if templates.length === 0}
+					<p class="empty">Önce "Şablonlar" sekmesinden bir dosya yükleyin.</p>
+				{:else}
+					<div class="event-list">
+						{#each templates as t}
+							<button class="ev-item" class:selected={selectedTemplateId === t.id}
+								type="button" onclick={() => (selectedTemplateId = t.id)}>
+								<strong>{fileIcon(t.file_type)} {t.name}</strong>
+								<span>.{t.file_type} · {new Date(t.created_at).toLocaleDateString('tr-TR')}</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+
+			<button class="gen-btn" type="button"
+				onclick={generateContract}
+				disabled={!selectedEventId || !selectedTemplateId || generating}>
+				{generating ? 'Oluşturuluyor…' : '⬇ Sözleşme Oluştur & İndir'}
+			</button>
+
+			{#if genError}<p class="error-msg">{genError}</p>{/if}
+			{#if genSuccess}<p class="success-msg">✓ {genSuccess}</p>{/if}
+		</aside>
+
+		<!-- Preview panel -->
+		<div class="panel preview-panel">
+			{#if selectedEvent && selectedTemplate}
+				<div class="preview-head">
+					<div>
+						<h2>{selectedEvent.title}</h2>
+						<p>{fmtDate(selectedEvent.event_date)} · {selectedEvent.guest_count} kişi</p>
+					</div>
+					<div class="preview-tmpl">
+						<span>{fileIcon(selectedTemplate.file_type)}</span>
+						<span>{selectedTemplate.name}</span>
+						<span class="ext-badge {selectedTemplate.file_type}">.{selectedTemplate.file_type}</span>
+					</div>
+				</div>
+
+				<div class="event-detail-grid">
+					<div class="detail-row"><span>Müşteri</span><strong>{selectedEvent.full_name || '—'}</strong></div>
+					<div class="detail-row"><span>Gelin & Damat</span><strong>{selectedEvent.bride_groom || '—'}</strong></div>
+					<div class="detail-row"><span>T.C. No</span><strong>{selectedEvent.tc_no || '—'}</strong></div>
+					<div class="detail-row"><span>Telefon</span><strong>{selectedEvent.mobile_phone || selectedEvent.phone || '—'}</strong></div>
+					<div class="detail-row"><span>Saat</span><strong>{selectedEvent.start_time} – {selectedEvent.end_time}</strong></div>
+					<div class="detail-row"><span>Rezervasyon</span><strong>{selectedEvent.reservation_status}</strong></div>
+					<div class="detail-row"><span>Toplam Ücret</span><strong>{fmtMoney(selectedEvent.total_fee)}</strong></div>
+					<div class="detail-row"><span>Kapora</span><strong>{fmtMoney(selectedEvent.kapora_amount)}</strong></div>
+					<div class="detail-row"><span>Ödenen</span><strong>{fmtMoney(selectedEvent.total_paid)}</strong></div>
+					<div class="detail-row"><span>Kalan</span><strong style="color:#dc2626">{fmtMoney(selectedEvent.total_fee - selectedEvent.total_paid)}</strong></div>
+					{#if selectedEvent.address}
+					<div class="detail-row full"><span>Adres</span><strong>{selectedEvent.address}</strong></div>
+					{/if}
+					{#if selectedEvent.note}
+					<div class="detail-row full"><span>Not</span><strong>{selectedEvent.note}</strong></div>
+					{/if}
+				</div>
+
+				<div class="gen-info">
+					<p>Sözleşme No: <code>{salon?.contract_prefix ?? 'EVT'}-{selectedEvent.id.slice(0,8).toUpperCase()}</code></p>
+					<p>Şablon dosyasındaki tüm <code>%placeholder%</code> alanları yukarıdaki verilerle doldurulacak.</p>
+				</div>
+
+				<button class="gen-btn-inline" type="button" onclick={generateContract} disabled={generating}>
+					{generating ? 'Oluşturuluyor…' : `⬇ ${selectedTemplate.name} olarak indir (.${selectedTemplate.file_type})`}
+				</button>
+
+				{#if genError}<p class="error-msg">{genError}</p>{/if}
+				{#if genSuccess}<p class="success-msg">✓ {genSuccess}</p>{/if}
+			{:else}
+				<div class="preview-empty">
+					<div class="preview-empty-icon">📋</div>
+					<h3>Sol taraftan davet ve şablon seçin</h3>
+					<p>Seçim yaptıktan sonra burada etkinlik detayları görünür ve sözleşme indirilir.</p>
+				</div>
+			{/if}
 		</div>
+	</div>
 	{/if}
 </section>
 
 <style>
-	.page-shell { max-width: 1480px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
-	.page-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-	h1, h2, p { margin: 0; }
+	.page-shell { max-width: 1480px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.1rem; }
+	.page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+	h1, h2, h3, p { margin: 0; }
 	h1 { font-size: clamp(1.6rem, 3vw, 2.6rem); }
 	h2 { font-size: 1rem; font-weight: 900; }
-
 	.eyebrow { margin-bottom: 0.25rem; color: var(--accent); font-size: 0.78rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
+	.sub, .hint { color: var(--muted); font-size: 0.83rem; margin-top: 0.15rem; }
 
-	.tab-switch { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0.3rem; gap: 0.25rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-	.tab-switch button { border: 0; border-radius: 6px; padding: 0.6rem 1.1rem; background: transparent; color: var(--muted); font: inherit; font-weight: 800; cursor: pointer; }
-	.tab-switch .active { background: var(--accent); color: #fff; }
+	.tab-bar { display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 0.3rem; gap: 0.25rem; }
+	.tab-bar button { border: none; border-radius: 6px; padding: 0.6rem 1.1rem; background: transparent; color: var(--muted); font: inherit; font-weight: 800; cursor: pointer; }
+	.tab-bar .active { background: var(--accent); color: #fff; }
 
-	/* Templates tab */
-	.templates-layout { display: grid; grid-template-columns: 320px 1fr; gap: 1rem; align-items: start; }
-	.template-list-col { display: flex; flex-direction: column; gap: 0.85rem; }
+	/* Layout */
+	.two-col { display: grid; grid-template-columns: 360px 1fr; gap: 1rem; align-items: start; }
+	.col-left { display: flex; flex-direction: column; gap: 1rem; }
+	.col-right { flex: 1; }
+	.generate-layout { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: start; }
+	.gen-sidebar { display: flex; flex-direction: column; gap: 1rem; }
 
-	.col-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.15rem; }
+	/* Panel */
+	.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem; display: flex; flex-direction: column; gap: 0.85rem; box-shadow: 0 10px 28px rgba(0,0,0,0.1); }
 
-	.sm-btn { border: 1px solid var(--line); border-radius: 7px; padding: 0.5rem 0.85rem; background: var(--surface-strong); color: var(--text); font: inherit; font-weight: 800; font-size: 0.82rem; cursor: pointer; white-space: nowrap; }
-	.sm-btn:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+	/* Upload */
+	.upload-panel { gap: 0.9rem; }
+	.file-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4rem; min-height: 120px; border: 2px dashed var(--line); border-radius: 10px; cursor: pointer; padding: 1.25rem; background: var(--surface-strong); transition: border-color 0.15s; position: relative; }
+	.file-drop:hover { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+	.file-drop.has-file { border-color: var(--accent); background: var(--accent-soft); }
+	.file-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+	.drop-icon, .file-icon { font-size: 2rem; }
+	.drop-text { font-weight: 800; font-size: 0.92rem; }
+	.drop-hint, .file-size { font-size: 0.76rem; color: var(--muted); }
+	.file-name { font-weight: 800; font-size: 0.88rem; color: var(--accent); }
 
-	.primary-btn { border: 0; border-radius: 7px; padding: 0.65rem 1.1rem; background: var(--accent); color: #fff; font: inherit; font-weight: 900; cursor: pointer; }
+	/* Template list */
+	.count { font-size: 0.78rem; color: var(--muted); margin-left: 0.35rem; }
+	.tmpl-list { display: flex; flex-direction: column; gap: 0.45rem; }
+	.tmpl-row { display: flex; align-items: center; gap: 0.35rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); transition: border-color 0.15s; overflow: hidden; }
+	.tmpl-row.selected { border-color: var(--accent); }
+	.tmpl-btn { flex: 1; display: flex; align-items: center; gap: 0.65rem; padding: 0.7rem 0.85rem; background: transparent; border: none; color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+	.tmpl-icon { font-size: 1.2rem; flex-shrink: 0; }
+	.tmpl-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+	.tmpl-info strong { font-size: 0.88rem; font-weight: 800; }
+	.tmpl-info span { font-size: 0.72rem; color: var(--muted); }
+	.ext-badge { font-size: 0.68rem; font-weight: 900; padding: 0.15rem 0.4rem; border-radius: 4px; text-transform: uppercase; }
+	.ext-badge.docx { background: rgba(37,99,235,0.12); color: #2563eb; }
+	.ext-badge.odt { background: rgba(5,150,105,0.12); color: #059669; }
+	.del-btn { padding: 0.7rem 0.75rem; background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 0.82rem; flex-shrink: 0; }
+	.del-btn:hover { color: #dc2626; }
+
+	/* Placeholder panel */
+	.ph-panel { gap: 1rem; }
+	.ph-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.4rem; }
+	.ph-chip { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.5rem 0.7rem; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-strong); color: var(--text); cursor: pointer; text-align: left; font: inherit; transition: all 0.15s; }
+	.ph-chip:hover { border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: var(--accent-soft); }
+	.ph-chip code { font-family: 'Courier New', monospace; font-size: 0.77rem; color: var(--accent); font-weight: 700; }
+	.ph-chip span { font-size: 0.72rem; color: var(--muted); }
+	.ph-note { background: var(--surface-strong); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; font-size: 0.82rem; color: var(--muted); line-height: 1.65; }
+	.ph-note strong { color: var(--text); display: block; margin-bottom: 0.5rem; }
+	.ph-note ol { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; }
+	.ph-note code { font-family: 'Courier New', monospace; color: var(--accent); }
+
+	/* Generate */
+	.event-list { display: flex; flex-direction: column; gap: 0.4rem; max-height: 260px; overflow-y: auto; }
+	.ev-item { border: 1px solid var(--line); border-radius: 7px; padding: 0.6rem 0.8rem; background: var(--surface-strong); color: var(--text); font: inherit; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 0.12rem; transition: all 0.15s; }
+	.ev-item strong { font-size: 0.88rem; font-weight: 800; }
+	.ev-item span { font-size: 0.73rem; color: var(--muted); }
+	.ev-item.selected { border-color: var(--accent); background: var(--accent-soft); }
+
+	.gen-btn { width: 100%; border: none; border-radius: 9px; padding: 0.9rem; background: var(--accent); color: #fff; font: inherit; font-weight: 900; font-size: 0.95rem; cursor: pointer; }
+	.gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+	.gen-btn-inline { border: none; border-radius: 9px; padding: 0.85rem 1.25rem; background: var(--accent); color: #fff; font: inherit; font-weight: 900; font-size: 0.92rem; cursor: pointer; align-self: flex-start; }
+	.gen-btn-inline:disabled { opacity: 0.5; cursor: not-allowed; }
+
+	/* Preview */
+	.preview-panel { min-height: 400px; }
+	.preview-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+	.preview-head h2 { font-size: 1.15rem; }
+	.preview-head p { color: var(--muted); font-size: 0.82rem; margin-top: 0.15rem; }
+	.preview-tmpl { display: flex; align-items: center; gap: 0.4rem; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 7px; padding: 0.4rem 0.75rem; font-size: 0.82rem; font-weight: 800; flex-shrink: 0; }
+	.event-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+	.detail-row { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.65rem 0.85rem; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 7px; }
+	.detail-row.full { grid-column: 1 / -1; }
+	.detail-row span { font-size: 0.73rem; color: var(--muted); font-weight: 800; }
+	.detail-row strong { font-size: 0.9rem; }
+	.gen-info { background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 8px; padding: 0.85rem 1rem; font-size: 0.82rem; display: flex; flex-direction: column; gap: 0.3rem; color: var(--muted); }
+	.gen-info code { font-family: 'Courier New', monospace; color: var(--accent); font-weight: 700; }
+	.preview-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; min-height: 320px; gap: 0.75rem; text-align: center; color: var(--muted); }
+	.preview-empty-icon { font-size: 3rem; }
+	.preview-empty h3 { color: var(--text); font-size: 1.05rem; margin: 0; }
+
+	/* Shared */
+	.field-label { display: flex; flex-direction: column; gap: 0.35rem; font-weight: 800; font-size: 0.84rem; }
+	.field-label span { color: var(--muted); }
+	input { width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 7px; padding: 0.5rem 0.7rem; background: var(--surface-strong); color: var(--text); font: inherit; }
+	.primary-btn { border: none; border-radius: 8px; padding: 0.7rem 1.1rem; background: var(--accent); color: #fff; font: inherit; font-weight: 900; font-size: 0.88rem; cursor: pointer; }
 	.primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-	.ghost-btn { border: 1px solid var(--line); border-radius: 7px; padding: 0.65rem 1rem; background: transparent; color: var(--muted); font: inherit; font-weight: 800; cursor: pointer; }
+	.error-msg { color: #dc2626; font-size: 0.82rem; font-weight: 700; background: rgba(220,38,38,0.08); border: 1px solid rgba(220,38,38,0.2); border-radius: 7px; padding: 0.6rem 0.85rem; }
+	.success-msg { color: #16a34a; font-size: 0.82rem; font-weight: 700; background: rgba(22,163,74,0.08); border: 1px solid rgba(22,163,74,0.2); border-radius: 7px; padding: 0.6rem 0.85rem; }
+	.empty { color: var(--muted); font-size: 0.84rem; text-align: center; padding: 1rem 0; }
 
-	.new-template-form { display: flex; flex-direction: column; gap: 0.75rem; padding: 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); }
-	.form-actions { display: flex; gap: 0.5rem; }
-
-	.template-cards { display: flex; flex-direction: column; gap: 0.5rem; }
-	.template-card { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.75rem 0.85rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; transition: border-color 0.15s; }
-	.template-card.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
-	.tmpl-name-btn { flex: 1; display: flex; align-items: center; gap: 0.5rem; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 800; font-size: 0.9rem; cursor: pointer; text-align: left; }
-	.tmpl-icon { font-size: 1rem; }
-	.tmpl-actions { display: flex; gap: 0.25rem; }
-	.icon-btn { border: 0; background: transparent; cursor: pointer; font-size: 0.9rem; padding: 0.25rem 0.35rem; border-radius: 5px; opacity: 0.7; }
-	.icon-btn:hover { opacity: 1; background: var(--surface-strong); }
-	.icon-btn.danger:hover { background: color-mix(in srgb, #ef4444 12%, transparent); }
-
-	.empty-msg { color: var(--muted); font-size: 0.85rem; text-align: center; padding: 1.5rem 0; }
-
-	.template-detail-col { display: flex; flex-direction: column; }
-	.panel { display: flex; flex-direction: column; gap: 0.85rem; padding: 1rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 18px 38px rgba(0,0,0,0.12); }
-
-	.template-preview { font-family: 'Courier New', monospace; font-size: 0.82rem; line-height: 1.65; color: var(--text); background: var(--surface-strong); border: 1px solid var(--line); border-radius: 7px; padding: 1rem; white-space: pre-wrap; word-break: break-word; max-height: 560px; overflow-y: auto; margin: 0; }
-
-	.placeholder-panel { gap: 1rem; }
-	.sub { color: var(--muted); font-size: 0.82rem; }
-	.ph-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.5rem; }
-	.ph-chip { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.55rem 0.75rem; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-strong); color: var(--text); cursor: pointer; text-align: left; font: inherit; transition: all 0.15s; }
-	.ph-chip:hover { border-color: color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-strong)); }
-	.ph-chip code { font-family: 'Courier New', monospace; font-size: 0.8rem; color: var(--accent); font-weight: 700; }
-	.ph-chip span { font-size: 0.76rem; color: var(--muted); }
-
-	/* Generate tab */
-	.generate-layout { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; align-items: start; }
-	.generate-sidebar { display: flex; flex-direction: column; gap: 1rem; }
-
-	.event-list { display: flex; flex-direction: column; gap: 0.45rem; }
-	.event-item { border: 1px solid var(--line); border-radius: 7px; padding: 0.65rem 0.85rem; background: var(--surface-strong); color: var(--text); font: inherit; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 0.15rem; transition: all 0.15s; }
-	.event-item strong { font-size: 0.9rem; font-weight: 800; }
-	.event-item span { font-size: 0.76rem; color: var(--muted); }
-	.event-item.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-strong)); }
-
-	.download-btn { border: 0; border-radius: 8px; padding: 0.85rem; background: var(--accent); color: #fff; font: inherit; font-weight: 900; font-size: 0.95rem; cursor: pointer; }
-	.download-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-
-	.preview-col { min-height: 400px; }
-	.contract-preview { font-family: 'Courier New', monospace; font-size: 0.8rem; line-height: 1.7; color: var(--text); background: var(--surface-strong); border: 1px solid var(--line); border-radius: 7px; padding: 1.25rem; white-space: pre-wrap; word-break: break-word; max-height: 640px; overflow-y: auto; margin: 0; }
-
-	.preview-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; min-height: 280px; gap: 0.5rem; text-align: center; color: var(--muted); }
-	.preview-empty .sub { font-size: 0.82rem; }
-
-	/* Labels & inputs */
-	label { display: flex; flex-direction: column; gap: 0.35rem; font-weight: 800; font-size: 0.85rem; }
-	label span { color: var(--muted); }
-	label small { color: var(--muted); font-weight: 400; }
-	input, select, textarea { width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 7px; padding: 0.55rem 0.65rem; background: var(--surface-strong); color: var(--text); font: inherit; }
-	input[type=file] { min-height: auto; padding: 0.4rem 0; cursor: pointer; }
-	textarea { resize: vertical; }
-
-	.upload-error { color: #ef4444; font-size: 0.82rem; margin: 0; }
-
-	@media (max-width: 1100px) { .templates-layout, .generate-layout { grid-template-columns: 1fr; } }
-	@media (max-width: 720px) { .page-heading { flex-direction: column; align-items: stretch; } }
+	@media (max-width: 1100px) { .two-col, .generate-layout { grid-template-columns: 1fr; } }
+	@media (max-width: 720px) { .page-heading { flex-direction: column; align-items: stretch; } .event-detail-grid { grid-template-columns: 1fr; } }
 </style>

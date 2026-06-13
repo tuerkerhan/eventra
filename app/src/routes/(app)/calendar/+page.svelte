@@ -1,9 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, PORTAL_URL, type EventApi, type EventTypeApi, type VenueLayoutApi } from '$lib/api';
+	import { api, PORTAL_URL, type EventApi, type EventTypeApi, type VenueLayoutApi, type EventFormFieldDefApi } from '$lib/api';
 
 	type CalendarView = 'Günlük' | 'Haftalık' | 'Aylık' | 'Yıllık';
-	type FieldType = 'text' | 'number' | 'date' | 'time' | 'textarea' | 'select' | 'checkbox' | 'range';
 
 	const HOUR_H = 64;
 	const TSTART = 8;
@@ -11,10 +10,6 @@
 	const TIMELINE_H = (TEND - TSTART) * HOUR_H;
 	const HOURS_ARR = Array.from({ length: TEND - TSTART + 1 }, (_, i) => TSTART + i);
 	const HALF_H = Array.from({ length: (TEND - TSTART) * 2 }, (_, i) => TSTART * 60 + (i + 1) * 30).filter((m) => m % 60 !== 0);
-	const FIELD_TYPE_LABELS: Record<FieldType, string> = {
-		text: 'Metin', number: 'Sayı', date: 'Tarih', time: 'Saat',
-		textarea: 'Uzun Metin', select: 'Seçenek', checkbox: 'Onay Kutusu', range: 'Kaydırıcı'
-	};
 
 	const pad = (v: number) => v.toString().padStart(2, '0');
 	const dateKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -43,9 +38,7 @@
 	let clickedDate = $state(dateKey(new Date()));
 	let newTypeName = $state('');
 	let newTypeColor = $state('#64748b');
-	let newFieldLabel = $state('');
-	let newFieldType = $state<FieldType>('text');
-	let activeTab = $state<'genel' | 'sozlesme' | 'portal'>('genel');
+	let activeTab = $state<'genel' | 'portal'>('genel');
 	let dragSelStart = $state<number | null>(null);
 	let dragSelEnd = $state<number | null>(null);
 	let savingEvent = $state(false);
@@ -55,6 +48,7 @@
 	let events = $state<EventApi[]>([]);
 	let eventTypes = $state<EventTypeApi[]>([]);
 	let layouts = $state<VenueLayoutApi[]>([]);
+	let formFieldDefs = $state<EventFormFieldDefApi[]>([]);
 	let loadError = $state('');
 
 	let timelineRef: HTMLDivElement;
@@ -70,6 +64,17 @@
 	];
 
 	const selectedEvent = $derived(events.find((e) => e.id === selectedEventId) ?? null);
+	const hiddenBuiltins = $derived(new Set(
+		formFieldDefs.filter(f => f.is_builtin && !f.is_visible).map(f => f.key)
+	));
+	const visibleCustomDefs = $derived(formFieldDefs.filter(f => !f.is_builtin && f.is_visible));
+	const mergedCustomFields = $derived.by(() => {
+		if (!selectedEvent) return [];
+		return visibleCustomDefs.map(def => {
+			const existing = selectedEvent.custom_fields.find(f => f.key === def.key);
+			return existing ?? { key: def.key, label: def.label, value: def.field_type === 'checkbox' ? 'false' : '', field_type: def.field_type, options: def.options, sort_order: def.sort_order };
+		});
+	});
 	const typeColor = (typeId: string | null) => eventTypes.find(t => t.id === typeId)?.color ?? '#64748b';
 	const typeName = (typeId: string | null) => eventTypes.find(t => t.id === typeId)?.name ?? '';
 	const formatMoney = (v: number) => `₺${Math.round(v).toLocaleString('tr-TR')}`;
@@ -124,14 +129,16 @@
 
 	onMount(async () => {
 		try {
-			const [evs, types, lyts] = await Promise.all([
+			const [evs, types, lyts, ffdefs] = await Promise.all([
 				api.get<EventApi[]>('/events'),
 				api.get<EventTypeApi[]>('/events/types'),
-				api.get<VenueLayoutApi[]>('/venue/layouts')
+				api.get<VenueLayoutApi[]>('/venue/layouts'),
+				api.get<EventFormFieldDefApi[]>('/event-form-fields')
 			]);
 			events = evs;
 			eventTypes = types;
 			layouts = lyts;
+			formFieldDefs = ffdefs;
 			if (evs.length > 0) selectedEventId = evs[0].id;
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Veri yükleme hatası';
@@ -238,23 +245,16 @@
 		if (!selectedEventId) return;
 		events = events.map(e => {
 			if (e.id !== selectedEventId) return e;
-			return { ...e, custom_fields: e.custom_fields.map(f => f.key === fieldKey ? { ...f, value } : f) };
+			const existing = e.custom_fields.find(f => f.key === fieldKey);
+			if (existing) {
+				return { ...e, custom_fields: e.custom_fields.map(f => f.key === fieldKey ? { ...f, value } : f) };
+			}
+			const def = formFieldDefs.find(d => d.key === fieldKey);
+			return { ...e, custom_fields: [...e.custom_fields, {
+				key: fieldKey, label: def?.label ?? fieldKey, value,
+				field_type: def?.field_type ?? 'text', options: def?.options ?? [], sort_order: def?.sort_order ?? 0
+			}]};
 		});
-		scheduleAutoSave();
-	}
-
-	function addCustomField() {
-		const label = newFieldLabel.trim();
-		if (!label || !selectedEventId) return;
-		const slug = label.toLocaleLowerCase('tr-TR').replaceAll(' ', '_').replace(/[^a-z0-9_]/gi, '');
-		if (!selectedEvent) return;
-		const newField = {
-			key: slug || `custom_${selectedEvent.custom_fields.length + 1}`,
-			label, value: newFieldType === 'checkbox' ? 'false' : '',
-			field_type: newFieldType, options: [], sort_order: selectedEvent.custom_fields.length
-		};
-		events = events.map(e => e.id === selectedEventId ? { ...e, custom_fields: [...e.custom_fields, newField] } : e);
-		newFieldLabel = '';
 		scheduleAutoSave();
 	}
 
@@ -518,7 +518,6 @@
 				<div class="form-panel">
 					<div class="tabs">
 						<button class:active={activeTab === 'genel'} type="button" onclick={() => (activeTab = 'genel')}>Genel</button>
-						<button class:active={activeTab === 'sozlesme'} type="button" onclick={() => (activeTab = 'sozlesme')}>Sözleşme</button>
 						<button class:active={activeTab === 'portal'} type="button" onclick={() => (activeTab = 'portal')}>
 							Portal {#if selectedEvent.portal_enabled}<span class="portal-dot"></span>{/if}
 						</button>
@@ -527,31 +526,36 @@
 					{#if activeTab === 'genel'}
 						<div class="form-grid compact">
 							<label><span>Tarihi</span><input type="date" value={selectedEvent.event_date} oninput={(e) => updateSelected('event_date', e.currentTarget.value)} /></label>
-							<label><span>Başlama</span><input type="time" value={selectedEvent.start_time} oninput={(e) => updateSelected('start_time', e.currentTarget.value)} /></label>
-							<label><span>Bitiş</span><input type="time" value={selectedEvent.end_time} oninput={(e) => updateSelected('end_time', e.currentTarget.value)} /></label>
-							<label><span>Sözleşme Tarihi</span><input type="date" value={selectedEvent.contract_date} oninput={(e) => updateSelected('contract_date', e.currentTarget.value)} /></label>
+							{#if !hiddenBuiltins.has('start_time')}<label><span>Başlama</span><input type="time" value={selectedEvent.start_time} oninput={(e) => updateSelected('start_time', e.currentTarget.value)} /></label>{/if}
+							{#if !hiddenBuiltins.has('end_time')}<label><span>Bitiş</span><input type="time" value={selectedEvent.end_time} oninput={(e) => updateSelected('end_time', e.currentTarget.value)} /></label>{/if}
+							{#if !hiddenBuiltins.has('contract_date')}<label><span>Sözleşme Tarihi</span><input type="date" value={selectedEvent.contract_date} oninput={(e) => updateSelected('contract_date', e.currentTarget.value)} /></label>{/if}
 							<label><span>Sözleşme No</span><input value={selectedEvent.id} readonly /></label>
+							{#if !hiddenBuiltins.has('reservation_status')}
 							<div class="radio-group">
 								<label><input type="radio" checked={selectedEvent.reservation_status === 'Kesin Rezervasyon'} onchange={() => updateSelected('reservation_status', 'Kesin Rezervasyon')} /> Kesin</label>
 								<label><input type="radio" checked={selectedEvent.reservation_status === 'Ön Rezervasyon'} onchange={() => updateSelected('reservation_status', 'Ön Rezervasyon')} /> Ön</label>
 							</div>
+							{/if}
 						</div>
 						<div class="form-grid">
-							<label><span>T.C. Kimlik No</span><input value={selectedEvent.tc_no} oninput={(e) => updateSelected('tc_no', e.currentTarget.value)} /></label>
-							<label><span>Adı Soyadı</span><input value={selectedEvent.full_name} oninput={(e) => updateSelected('full_name', e.currentTarget.value)} /></label>
-							<label><span>Mobil Telefon</span><input value={selectedEvent.mobile_phone} oninput={(e) => updateSelected('mobile_phone', e.currentTarget.value)} /></label>
-							<label><span>Telefon</span><input value={selectedEvent.phone} oninput={(e) => updateSelected('phone', e.currentTarget.value)} /></label>
+							{#if !hiddenBuiltins.has('tc_no')}<label><span>T.C. Kimlik No</span><input value={selectedEvent.tc_no} oninput={(e) => updateSelected('tc_no', e.currentTarget.value)} /></label>{/if}
+							{#if !hiddenBuiltins.has('full_name')}<label><span>Adı Soyadı</span><input value={selectedEvent.full_name} oninput={(e) => updateSelected('full_name', e.currentTarget.value)} /></label>{/if}
+							{#if !hiddenBuiltins.has('mobile_phone')}<label><span>Mobil Telefon</span><input value={selectedEvent.mobile_phone} oninput={(e) => updateSelected('mobile_phone', e.currentTarget.value)} /></label>{/if}
+							{#if !hiddenBuiltins.has('phone')}<label><span>Telefon</span><input value={selectedEvent.phone} oninput={(e) => updateSelected('phone', e.currentTarget.value)} /></label>{/if}
+							{#if !hiddenBuiltins.has('type_id')}
 							<label><span>Organizasyon Tipi</span>
 								<select value={selectedEvent.type_id ?? ''} onchange={(e) => updateSelected('type_id', e.currentTarget.value || null)}>
 									<option value="">— Seçin —</option>
 									{#each eventTypes as t}<option value={t.id}>{t.name}</option>{/each}
 								</select>
 							</label>
-							<label><span>Gelin ve Damat</span><input value={selectedEvent.bride_groom} oninput={(e) => updateSelected('bride_groom', e.currentTarget.value)} /></label>
-							<label><span>Yöresi</span><input value={selectedEvent.region} oninput={(e) => updateSelected('region', e.currentTarget.value)} /></label>
-							<label><span>Davetli Sayısı</span><input type="number" value={selectedEvent.guest_count} oninput={(e) => updateSelected('guest_count', Number(e.currentTarget.value))} /></label>
-							<label class="full"><span>Adresi</span><textarea rows="2" value={selectedEvent.address} oninput={(e) => updateSelected('address', e.currentTarget.value)}></textarea></label>
-							<label><span>Toplam Ücret</span><input type="number" value={selectedEvent.total_fee} oninput={(e) => updateSelected('total_fee', Number(e.currentTarget.value))} /></label>
+							{/if}
+							{#if !hiddenBuiltins.has('bride_groom')}<label><span>Gelin ve Damat</span><input value={selectedEvent.bride_groom} oninput={(e) => updateSelected('bride_groom', e.currentTarget.value)} /></label>{/if}
+							{#if !hiddenBuiltins.has('region')}<label><span>Yöresi</span><input value={selectedEvent.region} oninput={(e) => updateSelected('region', e.currentTarget.value)} /></label>{/if}
+							{#if !hiddenBuiltins.has('guest_count')}<label><span>Davetli Sayısı</span><input type="number" value={selectedEvent.guest_count} oninput={(e) => updateSelected('guest_count', Number(e.currentTarget.value))} /></label>{/if}
+							{#if !hiddenBuiltins.has('address')}<label class="full"><span>Adresi</span><textarea rows="2" value={selectedEvent.address} oninput={(e) => updateSelected('address', e.currentTarget.value)}></textarea></label>{/if}
+							{#if !hiddenBuiltins.has('total_fee')}<label><span>Toplam Ücret</span><input type="number" value={selectedEvent.total_fee} oninput={(e) => updateSelected('total_fee', Number(e.currentTarget.value))} /></label>{/if}
+							{#if !hiddenBuiltins.has('kapora_amount')}
 							<label><span>Kapora Tutarı</span>
 								<div class="kapora-row">
 									<input type="number" value={selectedEvent.kapora_amount} oninput={(e) => updateSelected('kapora_amount', Number(e.currentTarget.value))} />
@@ -560,15 +564,43 @@
 									</label>
 								</div>
 							</label>
-							<label><span>Alınan Ücret</span><input type="number" value={selectedEvent.total_paid} oninput={(e) => updateSelected('total_paid', Number(e.currentTarget.value))} /></label>
+							{/if}
+							{#if !hiddenBuiltins.has('total_paid')}<label><span>Alınan Ücret</span><input type="number" value={selectedEvent.total_paid} oninput={(e) => updateSelected('total_paid', Number(e.currentTarget.value))} /></label>{/if}
 							<label><span>Kalan</span><input value={formatMoney(selectedEvent.total_fee - selectedEvent.total_paid)} readonly /></label>
-							<label class="full"><span>Ön Açıklama</span><textarea rows="3" value={selectedEvent.note} oninput={(e) => updateSelected('note', e.currentTarget.value)}></textarea></label>
-							<label class="full"><span>Çalışanlar</span><input value={selectedEvent.staff} oninput={(e) => updateSelected('staff', e.currentTarget.value)} /></label>
+							{#if !hiddenBuiltins.has('note')}<label class="full"><span>Ön Açıklama</span><textarea rows="3" value={selectedEvent.note} oninput={(e) => updateSelected('note', e.currentTarget.value)}></textarea></label>{/if}
+							{#if !hiddenBuiltins.has('staff')}<label class="full"><span>Çalışanlar</span><input value={selectedEvent.staff} oninput={(e) => updateSelected('staff', e.currentTarget.value)} /></label>{/if}
+							{#if !hiddenBuiltins.has('reminder_enabled')}
 							<div class="reminder-row full">
 								<label><input type="checkbox" checked={selectedEvent.reminder_enabled} onchange={(e) => updateSelected('reminder_enabled', e.currentTarget.checked)} /> Yaklaşınca Hatırlat</label>
 								<label><span>Tarih</span><input type="date" value={selectedEvent.reminder_date} oninput={(e) => updateSelected('reminder_date', e.currentTarget.value)} /></label>
 							</div>
+							{/if}
 						</div>
+
+						{#if mergedCustomFields.length > 0}
+						<div class="custom-fields-section">
+							<h4>Ek Alanlar</h4>
+							<div class="attribute-list">
+								{#each mergedCustomFields as field}
+									<label class="attribute-row">
+										<span>{field.label}</span>
+										{#if field.field_type === 'textarea'}
+											<textarea rows="2" value={field.value} oninput={(e) => updateCustomField(field.key, e.currentTarget.value)}></textarea>
+										{:else if field.field_type === 'select'}
+											<select value={field.value} onchange={(e) => updateCustomField(field.key, e.currentTarget.value)}>
+												<option value="">— Seçin —</option>
+												{#each field.options ?? [] as opt}<option value={opt}>{opt}</option>{/each}
+											</select>
+										{:else if field.field_type === 'checkbox'}
+											<label class="checkbox-inline"><input type="checkbox" checked={field.value === 'true'} onchange={(e) => updateCustomField(field.key, String(e.currentTarget.checked))} />{field.label}</label>
+										{:else}
+											<input type={field.field_type} value={field.value} oninput={(e) => updateCustomField(field.key, e.currentTarget.value)} />
+										{/if}
+									</label>
+								{/each}
+							</div>
+						</div>
+						{/if}
 
 						<div class="layouts-section">
 							<h4>Rezerve Edilen Salonlar</h4>
@@ -597,36 +629,7 @@
 
 						<button class="danger-btn" onclick={deleteEvent}>Daveti Sil</button>
 
-					{:else if activeTab === 'sozlesme'}
-						<div class="attribute-list">
-							{#each selectedEvent.custom_fields as field}
-								<label class="attribute-row">
-									<span>{field.label}<small>{field.key}</small></span>
-									{#if field.field_type === 'textarea'}
-										<textarea rows="2" value={field.value} oninput={(e) => updateCustomField(field.key, e.currentTarget.value)}></textarea>
-									{:else if field.field_type === 'select'}
-										<select value={field.value} onchange={(e) => updateCustomField(field.key, e.currentTarget.value)}>
-											{#each field.options ?? [] as opt}<option value={opt}>{opt}</option>{/each}
-										</select>
-									{:else if field.field_type === 'checkbox'}
-										<label class="checkbox-inline"><input type="checkbox" checked={field.value === 'true'} onchange={(e) => updateCustomField(field.key, String(e.currentTarget.checked))} />{field.label}</label>
-									{:else if field.field_type === 'range'}
-										<div class="range-wrap"><input type="range" min="0" max="100" value={field.value || '0'} oninput={(e) => updateCustomField(field.key, e.currentTarget.value)} /><span>{field.value || '0'}</span></div>
-									{:else}
-										<input type={field.field_type} value={field.value} oninput={(e) => updateCustomField(field.key, e.currentTarget.value)} />
-									{/if}
-								</label>
-							{/each}
-						</div>
-						<div class="inline-add field-add">
-							<input placeholder="Alan adı" bind:value={newFieldLabel} />
-							<select bind:value={newFieldType}>
-								{#each Object.entries(FIELD_TYPE_LABELS) as [val, lbl]}<option value={val}>{lbl}</option>{/each}
-							</select>
-							<button type="button" onclick={addCustomField}>Ekle</button>
-						</div>
-
-					{:else}
+					{:else if activeTab === 'portal'}
 						<!-- Portal tab -->
 						<div class="portal-section">
 							<label class="toggle-row">

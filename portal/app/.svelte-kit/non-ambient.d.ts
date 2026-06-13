@@ -41,6 +41,6 @@ declare module "$app/types" {
 		};
 		Pathname(): "/" | `/${string}` & {} | `/${string}/seating` & {};
 		ResolvedPathname(): `${"" | `/${string}`}${ReturnType<AppTypes['Pathname']>}`;
-		Asset(): string & {};
+		Asset(): "/ayarlar-icon.png" | "/contract-icon.png" | "/crown-icon.png" | "/dashboard-icon.png" | "/ikon.png" | "/logo-dikey.png" | "/logo-yatay.png" | "/musteriler-icon.png" | "/salon-duzeni.png" | "/takvim-icon.png" | string & {};
 	}
 }

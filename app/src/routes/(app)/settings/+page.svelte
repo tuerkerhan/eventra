@@ -1,12 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, type SalonApi, type EventTypeApi, type OrgTypeFieldApi } from '$lib/api';
+	import { api, type SalonApi, type EventTypeApi, type OrgTypeFieldApi, type EventFormFieldDefApi } from '$lib/api';
 
-	type FieldType = 'text' | 'number' | 'date' | 'textarea' | 'select' | 'checkbox' | 'range';
+	type FieldType = 'text' | 'number' | 'date' | 'time' | 'textarea' | 'select' | 'checkbox';
 	const FIELD_TYPE_LABELS: Record<FieldType, string> = {
-		text: 'Metin', number: 'Sayı', date: 'Tarih', textarea: 'Uzun Metin',
-		select: 'Seçenek', checkbox: 'Onay Kutusu', range: 'Kaydırıcı'
+		text: 'Metin', number: 'Sayı', date: 'Tarih', time: 'Saat',
+		textarea: 'Uzun Metin', select: 'Seçenek', checkbox: 'Onay Kutusu'
 	};
+
+	const PLACEHOLDER_OPTIONS = [
+		'%baslik%','%isim%','%gelin_damat%','%tc_no%','%telefon%','%tarih%',
+		'%sozlesme_tarihi%','%baslama_saati%','%bitis_saati%','%tip%',
+		'%rezervasyon_durumu%','%davetli_sayisi%','%adres%','%bolge%',
+		'%toplam_ucret%','%kapora%','%odenen%','%kalan%','%sozlesme_no%',
+		'%personel%','%notlar%','%salon_adi%','%salon_adresi%','%kdv_orani%'
+	];
 
 	// Salon settings
 	let salon = $state<SalonApi | null>(null);
@@ -27,16 +35,25 @@
 	let newFieldOptions = $state('');
 	let newFieldRequired = $state(false);
 
+	// Event form field defs
+	let formFieldDefs = $state<EventFormFieldDefApi[]>([]);
+	let newEfLabel = $state('');
+	let newEfType = $state<FieldType>('text');
+	let newEfTag = $state('');
+	let newEfOptions = $state('');
+
 	const selectedType = $derived(eventTypes.find(t => t.id === selectedTypeId) ?? null);
 
 	onMount(async () => {
 		try {
-			const [s, types] = await Promise.all([
+			const [s, types, ffdefs] = await Promise.all([
 				api.get<SalonApi>('/settings/salon'),
-				api.get<EventTypeApi[]>('/events/types')
+				api.get<EventTypeApi[]>('/events/types'),
+				api.get<EventFormFieldDefApi[]>('/event-form-fields')
 			]);
 			salon = { ...s };
 			eventTypes = types;
+			formFieldDefs = ffdefs;
 			if (types.length > 0) {
 				selectedTypeId = types[0].id;
 				await loadOrgFields(types[0].id);
@@ -119,6 +136,36 @@
 	async function deleteOrgField(id: string) {
 		await api.del(`/settings/org-type-fields/${id}`);
 		orgFields = orgFields.filter(f => f.id !== id);
+	}
+
+	// ── Event form field def actions ─────────────────────────────────────────
+	async function toggleFieldVisibility(f: EventFormFieldDefApi) {
+		const updated = await api.patch<EventFormFieldDefApi>(`/event-form-fields/${f.id}`, { is_visible: !f.is_visible });
+		formFieldDefs = formFieldDefs.map(d => d.id === updated.id ? updated : d);
+	}
+
+	async function addEventFormField() {
+		const label = newEfLabel.trim();
+		if (!label) return;
+		const slug = label.toLocaleLowerCase('tr-TR').replaceAll(' ', '_').replace(/[^a-z0-9_]/gi, '');
+		const options = newEfOptions.split(',').map(s => s.trim()).filter(Boolean);
+		const f = await api.post<EventFormFieldDefApi>('/event-form-fields', {
+			key: slug || `custom_${formFieldDefs.length}`,
+			label,
+			field_type: newEfType,
+			options,
+			placeholder_tag: newEfTag,
+			sort_order: formFieldDefs.length
+		});
+		formFieldDefs = [...formFieldDefs, f];
+		newEfLabel = '';
+		newEfTag = '';
+		newEfOptions = '';
+	}
+
+	async function deleteEventFormField(id: string) {
+		await api.del(`/event-form-fields/${id}`);
+		formFieldDefs = formFieldDefs.filter(f => f.id !== id);
 	}
 </script>
 
@@ -227,6 +274,75 @@
 					</div>
 				{/if}
 			</section>
+
+			<!-- ── Etkinlik Formu Alanları ──────────────────────────────── -->
+			<section class="panel ef-panel">
+				<h2>Etkinlik Formu Alanları</h2>
+				<p class="hint">Takvim formunda hangi alanların görüneceğini ayarla. Yerleşik alanları gizleyebilir, yeni alanlar ekleyip sözleşme etiketiyle ilişkilendirebilirsin.</p>
+
+				<div class="ef-section">
+					<h3>Yerleşik Alanlar</h3>
+					<div class="field-list">
+						{#each formFieldDefs.filter(f => f.is_builtin) as f}
+							<div class="field-row">
+								<div class="field-info">
+									<strong>{f.label}</strong>
+									{#if f.placeholder_tag}<code class="ph-tag">{f.placeholder_tag}</code>{/if}
+								</div>
+								<button
+									class="vis-btn"
+									class:hidden={!f.is_visible}
+									type="button"
+									onclick={() => toggleFieldVisibility(f)}
+									title={f.is_visible ? 'Gizle' : 'Göster'}
+								>{f.is_visible ? '👁' : '🚫'}</button>
+							</div>
+						{/each}
+					</div>
+				</div>
+
+				<div class="ef-section">
+					<h3>Özel Alanlar</h3>
+					{#if formFieldDefs.filter(f => !f.is_builtin).length === 0}
+						<p class="empty-hint">Henüz özel alan eklenmemiş.</p>
+					{:else}
+						<div class="field-list">
+							{#each formFieldDefs.filter(f => !f.is_builtin) as f}
+								<div class="field-row">
+									<div class="field-info">
+										<strong>{f.label}</strong>
+										<span>{FIELD_TYPE_LABELS[f.field_type as FieldType] ?? f.field_type}</span>
+										{#if f.placeholder_tag}<code class="ph-tag">{f.placeholder_tag}</code>{/if}
+									</div>
+									<button class="vis-btn" class:hidden={!f.is_visible} type="button" onclick={() => toggleFieldVisibility(f)} title={f.is_visible ? 'Gizle' : 'Göster'}>{f.is_visible ? '👁' : '🚫'}</button>
+									<button class="del-btn" type="button" onclick={() => deleteEventFormField(f.id)}>Sil</button>
+								</div>
+							{/each}
+						</div>
+					{/if}
+
+					<div class="field-add-form">
+						<label><span>Alan Adı</span><input placeholder="Örn: Nota Ek Bilgi" bind:value={newEfLabel} /></label>
+						<label><span>Tip</span>
+							<select bind:value={newEfType}>
+								{#each Object.entries(FIELD_TYPE_LABELS) as [val, lbl]}
+									<option value={val}>{lbl}</option>
+								{/each}
+							</select>
+						</label>
+						{#if newEfType === 'select'}
+							<label class="full"><span>Seçenekler (virgülle ayır)</span><input placeholder="Seçenek 1, Seçenek 2" bind:value={newEfOptions} /></label>
+						{/if}
+						<label class="full"><span>Sözleşme Etiketi <span class="opt-hint">(opsiyonel — örn: %ozel_alan%)</span></span>
+							<input bind:value={newEfTag} placeholder="%ozel_alan%" list="ph-list" />
+							<datalist id="ph-list">
+								{#each PLACEHOLDER_OPTIONS as ph}<option value={ph}>{ph}</option>{/each}
+							</datalist>
+						</label>
+						<button class="add-field-btn" type="button" onclick={addEventFormField}>Alan Ekle</button>
+					</div>
+				</div>
+			</section>
 		</div>
 	{:else if !loadError}
 		<div class="loading">Yükleniyor…</div>
@@ -237,7 +353,7 @@
 	.page-shell { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
 	h1, h2, h3, p { margin: 0; }
 	.eyebrow { margin-bottom: 0.25rem; color: var(--accent); font-size: 0.78rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
-	.settings-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.6fr); gap: 1rem; align-items: start; }
+	.settings-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.4fr) minmax(0,1.4fr); gap: 1rem; align-items: start; }
 	.panel { display: flex; flex-direction: column; gap: 0.85rem; padding: 1.2rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 18px 38px rgba(0,0,0,0.12); }
 	h2 { font-size: 1rem; color: var(--accent); }
 	h3 { font-size: 0.92rem; display: flex; align-items: center; gap: 0.5rem; }
@@ -273,5 +389,13 @@
 	.empty-hint { color: var(--muted); font-size: 0.82rem; font-style: italic; }
 	.error-bar { padding: 0.85rem 1rem; background: color-mix(in srgb, var(--danger) 12%, transparent); border: 1px solid var(--danger); border-radius: 8px; color: var(--danger); font-weight: 800; }
 	.loading { color: var(--muted); padding: 2rem; text-align: center; }
-	@media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } }
+	.ef-panel { gap: 1rem; }
+	.ef-section { display: flex; flex-direction: column; gap: 0.65rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
+	.ef-section h3 { font-size: 0.85rem; font-weight: 900; color: var(--muted); margin: 0; }
+	.opt-hint { font-weight: 400; color: var(--muted); font-size: 0.75rem; }
+	.vis-btn { padding: 0.35rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; background: transparent; cursor: pointer; font-size: 0.92rem; transition: opacity 0.15s; }
+	.vis-btn.hidden { opacity: 0.35; }
+	.ph-tag { font-family: 'Courier New', monospace; font-size: 0.7rem; color: var(--accent); background: var(--accent-soft); padding: 0.1rem 0.35rem; border-radius: 4px; }
+	@media (max-width: 1100px) { .settings-grid { grid-template-columns: 1fr 1fr; } }
+	@media (max-width: 700px) { .settings-grid { grid-template-columns: 1fr; } }
 </style>
