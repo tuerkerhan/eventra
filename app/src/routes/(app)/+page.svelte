@@ -1,276 +1,191 @@
 <script lang="ts">
-	interface Event {
-		id: string;
-		couple: string;
-		date: string;
-		startTime: string;
-		endTime: string;
-		type: string;
-		totalPrice: number;
-		paidAmount: number;
-		paymentStatus: 'KAPORA_ALINDI' | 'KISMI_ODEME' | 'TAMAMLANDI';
-		contractSigned: boolean;
-		orgDetailsReceived: boolean;
-	}
+	import { onMount } from 'svelte';
+	import { api, type EventApi, type EventTypeApi, type SalonApi } from '$lib/api';
 
-	const today = new Date('2026-06-11');
-	
-	const getDaysLeft = (eventDateStr: string) => {
-		const parts = eventDateStr.split('.');
-		const targetDate = new Date(`${parts[2]}-${parts[1]}-${parts[0]}`);
-		const diffTime = targetDate.getTime() - today.getTime();
-		return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+	let events = $state<EventApi[]>([]);
+	let eventTypes = $state<EventTypeApi[]>([]);
+	let salon = $state<SalonApi | null>(null);
+
+	const today = new Date();
+
+	onMount(async () => {
+		try {
+			const [evs, types, s] = await Promise.all([
+				api.get<EventApi[]>('/events'),
+				api.get<EventTypeApi[]>('/events/types'),
+				api.get<SalonApi>('/settings/salon')
+			]);
+			events = evs;
+			eventTypes = types;
+			salon = s;
+		} catch {}
+	});
+
+	const typeName = (typeId: string | null) => eventTypes.find(t => t.id === typeId)?.name ?? '—';
+	const formatMoney = (value: number) => `₺${value.toLocaleString('tr-TR')}`;
+
+	const upcomingEvents = $derived(
+		events
+			.filter(e => new Date(e.event_date + 'T00:00:00') >= today)
+			.sort((a, b) => a.event_date.localeCompare(b.event_date))
+			.slice(0, 5)
+	);
+
+	const thisMonth = today.toISOString().slice(0, 7);
+	const monthEvents = $derived(events.filter(e => e.event_date.startsWith(thisMonth)));
+	const monthRevenue = $derived(monthEvents.reduce((s, e) => s + e.total_fee, 0));
+	const monthPaid = $derived(monthEvents.reduce((s, e) => s + e.total_paid, 0));
+	const remaining = $derived(monthRevenue - monthPaid);
+
+	const paymentStatus = (ev: EventApi) => {
+		if (ev.payment_complete) return { label: 'Tamamlandı', color: '#16a34a' };
+		if (ev.total_paid > 0) return { label: 'Kısmi ödeme', color: '#2563eb' };
+		if (ev.kapora_paid) return { label: 'Kapora alındı', color: '#f59e0b' };
+		return { label: 'Bekliyor', color: '#dc2626' };
 	};
 
-	const upcomingEvents: Event[] = [
-		{
-			id: '2962',
-			couple: 'Ayşe & Ahmet',
-			date: '18.06.2026',
-			startTime: '19:00',
-			endTime: '23:30',
-			type: 'DÜĞÜN',
-			totalPrice: 150000,
-			paidAmount: 25000,
-			paymentStatus: 'KAPORA_ALINDI',
-			contractSigned: true,
-			orgDetailsReceived: false
-		},
-		{
-			id: '2963',
-			couple: 'Burcu & Cem',
-			date: '25.06.2026',
-			startTime: '20:00',
-			endTime: '24:00',
-			type: 'NİŞAN',
-			totalPrice: 85000,
-			paidAmount: 50000,
-			paymentStatus: 'KISMI_ODEME',
-			contractSigned: true,
-			orgDetailsReceived: true
-		},
-		{
-			id: '2964',
-			couple: 'Derya & Emre',
-			date: '02.07.2026',
-			startTime: '14:00',
-			endTime: '18:00',
-			type: 'KINA',
-			totalPrice: 60000,
-			paidAmount: 60000,
-			paymentStatus: 'TAMAMLANDI',
-			contractSigned: true,
-			orgDetailsReceived: true
-		}
-	];
-
-	const getStatusColor = (status: string) => {
-		if (status === 'KAPORA_ALINDI') return '#ef4444'; 
-		if (status === 'KISMI_ODEME') return '#3b82f6';   
-		if (status === 'TAMAMLANDI') return '#10b981';    
-		return '#94a3b8';
+	const getDaysLeft = (dateStr: string) => {
+		const target = new Date(dateStr + 'T00:00:00');
+		return Math.ceil((target.getTime() - today.getTime()) / 86400000);
 	};
+
+	const totalPaidAll = $derived(events.reduce((s, e) => s + (e.payment_complete ? e.total_fee : e.total_paid), 0));
+	const totalPartial = $derived(events.reduce((s, e) => s + (!e.payment_complete && e.total_paid > 0 ? e.total_paid : 0), 0));
+	const totalPending = $derived(events.reduce((s, e) => s + (e.total_fee - e.total_paid), 0));
 </script>
 
-<div class="dashboard-wrapper">
-	<div class="page-header">
-		<h1 class="section-title">Yaklaşan Etkinlikler & Rezervasyonlar</h1>
-		<p class="section-subtitle">Tüm operasyonel süreçlerinizi buradan takip edebilirsiniz.</p>
+<section class="home-shell">
+	<div class="page-heading">
+		<div>
+			<p class="eyebrow">Ana Sayfa</p>
+			<h1>{salon?.name ?? 'Eventra'}</h1>
+			<p>Gelir, tahsilat ve yaklaşan davetleri tek ekranda gör.</p>
+		</div>
+		<a class="dashboard-link" href="/dashboard">Dashboard</a>
 	</div>
 
-	<div class="events-grid">
-		{#each upcomingEvents as event}
-			<div class="event-card" style="border-top: 4px solid {getStatusColor(event.paymentStatus)}">
-				
-				<div class="event-header">
-					<div class="date-badge">
-						<span class="day">{event.date.split('.')[0]}</span>
-						<span class="month">{event.date.split('.')[1]}/{event.date.split('.')[2]}</span>
-					</div>
-					<div class="event-main-info">
-						<h3 class="couple-name">{event.couple} <span class="event-type">({event.type})</span></h3>
-						<div class="time-info">⏰ {event.startTime} - {event.endTime} | Sözleşme No: #{event.id}</div>
-					</div>
-					<div class="countdown">
-						<div class="days-left">{getDaysLeft(event.date)}</div>
-						<div class="days-label">GÜN KALDI</div>
-					</div>
+	<div class="summary-grid">
+		<div class="metric-card strong">
+			<span>{today.toLocaleDateString('tr-TR', { month: 'long' })} ciro</span>
+			<strong>{formatMoney(monthRevenue)}</strong>
+			<small>{monthEvents.length} davet bu ay</small>
+		</div>
+		<div class="metric-card">
+			<span>Tahsil edilen</span>
+			<strong>{formatMoney(monthPaid)}</strong>
+			<small>{formatMoney(remaining)} bekleyen ödeme</small>
+		</div>
+		<div class="metric-card">
+			<span>Toplam davet</span>
+			<strong>{events.length}</strong>
+			<small>{events.filter(e => e.portal_enabled).length} aktif portal</small>
+		</div>
+		<div class="metric-card">
+			<span>Yaklaşan davet</span>
+			<strong>{upcomingEvents.length}</strong>
+			<small>{upcomingEvents[0] ? `En yakın davete ${getDaysLeft(upcomingEvents[0].event_date)} gün kaldı` : 'Yaklaşan davet yok'}</small>
+		</div>
+	</div>
+
+	<div class="content-grid">
+		<section class="panel">
+			<div class="panel-head">
+				<div>
+					<h2>Yaklaşan Davetler</h2>
+					<p>Takvimden tam görünümü açabilirsin.</p>
 				</div>
+				<a href="/calendar">Takvim</a>
+			</div>
 
-				<hr class="card-divider" />
-
-				<div class="event-details">
-					<div class="finance-block">
-						<div class="finance-status" style="color: {getStatusColor(event.paymentStatus)}">
-							{event.paymentStatus.replace('_', ' ')}
+			<div class="event-list">
+				{#each upcomingEvents as event}
+					{@const ps = paymentStatus(event)}
+					<a class="event-row" href="/calendar">
+						<div class="date-box">
+							<strong>{new Date(event.event_date + 'T00:00:00').toLocaleDateString('tr-TR', { day: '2-digit' })}</strong>
+							<span>{new Date(event.event_date + 'T00:00:00').toLocaleDateString('tr-TR', { month: 'short' })}</span>
 						</div>
-						<div class="finance-numbers">
-							<div class="amount-row">
-								<span>Toplam:</span>
-								<strong>₺{event.totalPrice.toLocaleString('tr-TR')}</strong>
-							</div>
-							<div class="amount-row">
-								<span>Alınan:</span>
-								<strong style="color: #D4AF37">₺{event.paidAmount.toLocaleString('tr-TR')}</strong>
-							</div>
-							<div class="amount-row remaining">
-								<span>Kalan:</span>
-								<strong>₺{(event.totalPrice - event.paidAmount).toLocaleString('tr-TR')}</strong>
-							</div>
+						<div class="event-main">
+							<strong>{event.title}{event.bride_groom ? ` · ${event.bride_groom}` : ''}</strong>
+							<span>{typeName(event.type_id)} · {event.start_time} · {event.guest_count} kişi</span>
 						</div>
-					</div>
+						<div class="payment-pill" style="--status:{ps.color}">
+							{ps.label}
+						</div>
+					</a>
+				{:else}
+					<p class="empty">Henüz davet yok. <a href="/calendar">Takvimden davet ekle.</a></p>
+				{/each}
+			</div>
+		</section>
 
-					<div class="checklist-block">
-						<h4 class="checklist-title">Operasyon Durumu</h4>
-						<label class="check-item">
-							<input type="checkbox" checked={event.contractSigned} disabled />
-							<span class="check-text">Sözleşme İmzalandı</span>
-						</label>
-						<label class="check-item">
-							<input type="checkbox" checked={event.orgDetailsReceived} disabled />
-							<span class="check-text">Organizasyon Bilgileri Alındı</span>
-						</label>
-					</div>
-				</div>
-				
-				<div class="action-block">
-					<button class="detail-btn">Sözleşme Detaylarına Git</button>
+		<section class="panel">
+			<div class="panel-head">
+				<div>
+					<h2>Nakit Akışı</h2>
+					<p>Tahsilat ve bekleyen ödemeler.</p>
 				</div>
 			</div>
-		{/each}
+
+			<div class="cash-bars">
+				<div>
+					<span>Tamamlanan ödemeler</span>
+					<div class="bar"><i style="width: {monthRevenue > 0 ? Math.round(totalPaidAll / Math.max(monthRevenue + totalPending, 1) * 100) : 0}%"></i></div>
+					<strong>{formatMoney(totalPaidAll)}</strong>
+				</div>
+				<div>
+					<span>Kısmi ödemeler</span>
+					<div class="bar blue"><i style="width: {monthRevenue > 0 ? Math.round(totalPartial / Math.max(monthRevenue + totalPending, 1) * 100) : 0}%"></i></div>
+					<strong>{formatMoney(totalPartial)}</strong>
+				</div>
+				<div>
+					<span>Bekleyen tahsilat</span>
+					<div class="bar red"><i style="width: {monthRevenue > 0 ? Math.round(totalPending / Math.max(monthRevenue + totalPending, 1) * 100) : 0}%"></i></div>
+					<strong>{formatMoney(totalPending)}</strong>
+				</div>
+			</div>
+		</section>
 	</div>
-</div>
+</section>
 
 <style>
-	.dashboard-wrapper {
-		display: flex;
-		flex-direction: column;
-		gap: 2rem;
-		max-width: 1600px;
-		margin: 0 auto; /* Ekranı ortalar */
+	.home-shell { max-width: 1480px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.25rem; }
+	.page-heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+	.eyebrow { margin: 0 0 0.25rem; color: var(--accent); font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.78rem; }
+	h1, h2, p { margin: 0; }
+	h1 { font-size: clamp(1.8rem, 3.4vw, 3rem); }
+	.page-heading p, .panel-head p, .metric-card small, .event-main span, .cash-bars span { color: var(--muted); }
+	.dashboard-link, .panel-head a { color: #ffffff; background: var(--accent); border-radius: 8px; padding: 0.8rem 1rem; text-decoration: none; font-weight: 900; white-space: nowrap; }
+	.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+	.metric-card, .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 18px 38px rgba(0, 0, 0, 0.12); }
+	.metric-card { display: flex; flex-direction: column; gap: 0.45rem; padding: 1.1rem; }
+	.metric-card span { color: var(--muted); font-weight: 800; font-size: 0.88rem; }
+	.metric-card strong { font-size: clamp(1.45rem, 2.6vw, 2.15rem); }
+	.metric-card.strong { background: linear-gradient(135deg, var(--accent-soft), var(--surface)); }
+	.content-grid { display: grid; grid-template-columns: 1.35fr 0.8fr; gap: 1rem; }
+	.panel { padding: 1rem; }
+	.panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+	.panel h2 { font-size: 1.15rem; margin-bottom: 0.2rem; }
+	.event-list, .cash-bars { display: flex; flex-direction: column; gap: 0.75rem; }
+	.event-row { display: grid; grid-template-columns: 62px 1fr auto; align-items: center; gap: 0.85rem; padding: 0.85rem; border: 1px solid var(--line); border-radius: 8px; color: var(--text); text-decoration: none; background: var(--surface-strong); }
+	.date-box { display: grid; place-items: center; min-height: 58px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+	.date-box strong { font-size: 1.25rem; line-height: 1; }
+	.date-box span { font-size: 0.72rem; text-transform: uppercase; }
+	.event-main { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+	.payment-pill { color: var(--status); background: color-mix(in srgb, var(--status) 12%, transparent); border: 1px solid color-mix(in srgb, var(--status) 30%, transparent); border-radius: 999px; padding: 0.45rem 0.65rem; font-weight: 900; font-size: 0.78rem; white-space: nowrap; }
+	.cash-bars > div { display: grid; grid-template-columns: 1fr; gap: 0.45rem; padding: 0.85rem; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 8px; }
+	.cash-bars strong { font-size: 1.1rem; }
+	.bar { height: 10px; border-radius: 999px; background: var(--muted-surface); overflow: hidden; }
+	.bar i { display: block; height: 100%; background: #16a34a; border-radius: inherit; }
+	.bar.blue i { background: #2563eb; }
+	.bar.red i { background: #dc2626; }
+	.empty { color: var(--muted); font-size: 0.88rem; font-style: italic; text-align: center; padding: 1rem; }
+	.empty a { color: var(--accent); }
+	@media (max-width: 1000px) { .summary-grid, .content-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+	@media (max-width: 700px) {
+		.page-heading, .panel-head { flex-direction: column; align-items: stretch; }
+		.summary-grid, .content-grid { grid-template-columns: 1fr; }
+		.event-row { grid-template-columns: 56px 1fr; }
+		.payment-pill { grid-column: 2; width: fit-content; }
 	}
-
-	.page-header {
-		margin-bottom: 1rem;
-	}
-
-	.section-title {
-		color: #D4AF37;
-		margin: 0 0 0.5rem 0;
-		font-size: 2rem;
-		font-weight: 800;
-	}
-
-	.section-subtitle {
-		color: #94a3b8;
-		margin: 0;
-		font-size: 1rem;
-	}
-
-	/* YATAY DÜZEN: Kartlar ekran genişliğine göre yan yana dizilir */
-	.events-grid {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(600px, 1fr));
-		gap: 2rem;
-	}
-
-	.event-card {
-		background: #1C2438;
-		border-radius: 12px;
-		padding: 1.5rem;
-		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-		transition: transform 0.2s, box-shadow 0.2s;
-	}
-
-	.event-card:hover {
-		transform: translateY(-4px);
-		box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-	}
-
-	.event-header {
-		display: flex;
-		align-items: center;
-		gap: 1.5rem;
-	}
-
-	.date-badge {
-		background: #0B132B;
-		border: 1px solid #D4AF37;
-		border-radius: 8px;
-		padding: 1rem;
-		text-align: center;
-		min-width: 80px;
-	}
-
-	.day { display: block; font-size: 2rem; font-weight: 800; color: #F6EEDC; line-height: 1; }
-	.month { display: block; font-size: 0.9rem; color: #D4AF37; margin-top: 5px; }
-
-	.event-main-info { flex-grow: 1; }
-	.couple-name { color: #F6EEDC; font-size: 1.6rem; margin: 0 0 0.5rem 0; }
-	.event-type { color: #D4AF37; font-weight: normal; font-size: 1.1rem; }
-	.time-info { color: #94a3b8; font-size: 0.95rem; }
-
-	.countdown {
-		background: rgba(212, 175, 55, 0.05);
-		padding: 1rem 1.5rem;
-		border-radius: 8px;
-		text-align: center;
-		border: 1px dashed rgba(212, 175, 55, 0.3);
-	}
-
-	.days-left { font-size: 2.2rem; font-weight: 800; color: #D4AF37; line-height: 1; }
-	.days-label { font-size: 0.8rem; color: #F6EEDC; margin-top: 4px; letter-spacing: 1px; }
-
-	.card-divider { border: none; height: 1px; background: rgba(212, 175, 55, 0.1); margin: 0.5rem 0; }
-
-	.event-details {
-		display: flex;
-		gap: 1.5rem;
-	}
-
-	.finance-block {
-		flex: 1;
-		background: #0B132B;
-		padding: 1.2rem;
-		border-radius: 8px;
-	}
-
-	.finance-status { font-weight: 800; font-size: 1rem; margin-bottom: 1rem; letter-spacing: 0.5px; }
-	.finance-numbers { display: flex; flex-direction: column; gap: 0.5rem; color: #F6EEDC; font-size: 0.95rem; }
-	.amount-row { display: flex; justify-content: space-between; align-items: center; }
-	.amount-row.remaining { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed rgba(212, 175, 55, 0.2); font-size: 1.1rem; }
-
-	.checklist-block {
-		flex: 1;
-		background: rgba(11, 19, 43, 0.5);
-		padding: 1.2rem;
-		border-radius: 8px;
-		display: flex;
-		flex-direction: column;
-		gap: 0.8rem;
-	}
-
-	.checklist-title { color: #94a3b8; margin: 0; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px; }
-	.check-item { display: flex; align-items: center; gap: 0.8rem; color: #F6EEDC; font-size: 0.95rem; }
-	.check-item input[type="checkbox"] { width: 18px; height: 18px; accent-color: #D4AF37; }
-
-	.action-block { margin-top: 0.5rem; }
-	
-	.detail-btn {
-		width: 100%;
-		background: #1C2438;
-		color: #D4AF37;
-		border: 1px solid #D4AF37;
-		padding: 1rem;
-		border-radius: 8px;
-		font-weight: 700;
-		font-size: 1rem;
-		cursor: pointer;
-		transition: all 0.2s;
-	}
-
-	.detail-btn:hover { background: #D4AF37; color: #0B132B; }
 </style>

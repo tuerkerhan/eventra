@@ -1,132 +1,202 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { onMount } from 'svelte';
+	import { api, type SalonApi } from '$lib/api';
+
+	let { children } = $props();
+	let theme = $state<'dark' | 'light'>('dark');
+	let salonName = $state('İnci Davet');
+
+	onMount(async () => {
+		const saved = localStorage.getItem('eventra-theme');
+		if (saved === 'light' || saved === 'dark') theme = saved;
+		try {
+			const s = await api.get<SalonApi>('/settings/salon');
+			salonName = s.name;
+		} catch {}
+	});
 
 	const menuItems = [
-		{ name: 'Özet Paneli', path: '/', icon: '/dashboard-icon.png' },
-		{ name: 'Takvim & Ajanda', path: '/calendar', icon: '/takvim-icon.png' },
-		{ name: 'Müşteri Portalı', path: '/customers', icon: '/musteriler-icon.png' },
+		{ name: 'Dashboard', path: '/dashboard', icon: '/dashboard-icon.png' },
+		{ name: 'Takvim', path: '/calendar', icon: '/takvim-icon.png' },
+		{ name: 'Randevular', path: '/customers', icon: '/musteriler-icon.png' },
+		{ name: 'Salon Düzeni', path: '/venue', icon: '/salon-duzeni.png' },
 		{ name: 'Sözleşmeler', path: '/contracts', icon: '/contract-icon.png' },
-		{ name: 'Portal Ayarları', path: '/settings', icon: '/ayarlar-icon.png' }
+		{ name: 'Ayarlar', path: '/settings', icon: '/ayarlar-icon.png' }
 	];
+
+	const toggleTheme = () => {
+		theme = theme === 'dark' ? 'light' : 'dark';
+		localStorage.setItem('eventra-theme', theme);
+	};
 </script>
 
 <svelte:head>
-	<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap" rel="stylesheet">
+	<link href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap" rel="stylesheet" />
 </svelte:head>
 
-<div class="top-navbar-layout">
-	<header class="lux-navbar">
-		
-		<div class="brand-zone">
-			<div class="logo-spotlight"></div>
-			<img src="/logo-yatay.png" alt="Eventra Logo" class="brand-logo" />
-		</div>
-		
-		<nav class="nav-gallery">
+<div class="app-shell {theme}">
+	<header class="topbar">
+		<a class="brand" href="/" aria-label="Ana sayfa">
+			<span class="brand-logo-wrap">
+				<img src="/ikon.png" alt="" class="brand-logo" />
+			</span>
+			<span class="brand-title-wrap">
+				<img src="/crown-icon.png" alt="" class="brand-crown" />
+				<span class="brand-title">{salonName}</span>
+			</span>
+		</a>
+
+		<nav class="nav-gallery" aria-label="Ana menü">
 			{#each menuItems as item}
-				<a 
-					href={item.path} 
-					class="nav-card {$page.url.pathname === item.path ? 'active-card' : ''}"
-				>
+				<a href={item.path} class="nav-card {$page.url.pathname === item.path ? 'active-card' : ''}">
 					<div class="icon-container">
-						<img 
-							src="/crown-icon.png" 
-							alt="Crown" 
+						<img
+							src="/crown-icon.png"
+							alt=""
 							class="crown-icon {$page.url.pathname === item.path ? 'is-active' : ''}"
 						/>
-
-						<img src={item.icon} alt={item.name} class="massive-icon" />
+						<img src={item.icon} alt="" class="nav-icon" />
 					</div>
-
 					<span class="nav-text">{item.name}</span>
-
-					{#if $page.url.pathname === item.path}
-						<div class="active-indicator"></div>
-					{/if}
 				</a>
 			{/each}
 		</nav>
 
-		<div class="profile-zone">
-			<div class="user-details">
-				<div class="inci-brand-wrapper">
-					<img src="/crown-icon.png" alt="İnci Crown" class="inci-text-crown" />
-					<h1 class="inci-text">İnci Davet</h1>
-				</div>
-				<span class="user-role">Demo Hesabı - Tam Erişim</span>
-			</div>
-			
-			<div class="profile-frame">
-				<img src="/ikon.png" alt="Profile" class="client-avatar" />
-			</div>
+		<div class="top-actions">
+			<button class="theme-toggle" type="button" onclick={toggleTheme}>
+				<span>{theme === 'dark' ? 'Light' : 'Dark'}</span>
+			</button>
+			<a class="logout-link" href="/login">Logout</a>
 		</div>
 	</header>
 
 	<main class="portal-content">
-		<slot />
+		{@render children()}
 	</main>
 </div>
 
 <style>
 	:global(body) {
 		margin: 0;
-		font-family: 'Inter', system-ui, -apple-system, sans-serif;
-		background-color: #0B132B;
+		font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+		color: var(--text);
+		background: var(--page);
 	}
 
-	.top-navbar-layout {
-		display: flex;
-		flex-direction: column;
-		height: 100vh;
-		width: 100vw;
-		overflow: hidden;
-		background-color: #0B132B;
+	:global(*) {
+		box-sizing: border-box;
 	}
 
-	.lux-navbar {
-		height: 160px;
-		background: #0B132B;
-		border-bottom: 2px solid rgba(212, 175, 55, 0.2);
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 0 2rem;
+	.app-shell {
+		--page: #0f172a;
+		--surface: #172033;
+		--surface-strong: #101827;
+		--muted-surface: #202a3d;
+		--line: rgba(226, 232, 240, 0.12);
+		--text: #f8fafc;
+		--muted: #a9b4c6;
+		--accent: #c59b31;
+		--accent-soft: rgba(197, 155, 49, 0.12);
+		--danger: #ef4444;
+		--good: #16a34a;
+		--info: #2563eb;
+		min-height: 100vh;
+		background: var(--page);
+		color: var(--text);
+	}
+
+	.app-shell.light {
+		--page: #f5f7fb;
+		--surface: #ffffff;
+		--surface-strong: #eef2f7;
+		--muted-surface: #e7edf5;
+		--line: rgba(15, 23, 42, 0.12);
+		--text: #111827;
+		--muted: #56657a;
+		--accent: #9a6b08;
+		--accent-soft: rgba(154, 107, 8, 0.1);
+		background: var(--page);
+	}
+
+	.topbar {
+		position: sticky;
+		top: 0;
 		z-index: 20;
-		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-	}
-
-	.brand-zone {
-		position: relative;
-		display: flex;
+		display: grid;
+		grid-template-columns: minmax(210px, 260px) 1fr auto;
 		align-items: center;
-		height: 100%;
-		padding-right: 2rem;
+		gap: 1rem;
+		min-height: 142px;
+		padding: 1rem 1.5rem;
+		background: color-mix(in srgb, var(--surface) 94%, transparent);
+		border-bottom: 1px solid var(--line);
+		box-shadow: 0 14px 36px rgba(0, 0, 0, 0.16);
 	}
 
-	.logo-spotlight {
+	.brand {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.75rem;
+		color: var(--text);
+		text-decoration: none;
+		min-width: 0;
+	}
+
+	.brand-logo-wrap {
+		position: relative;
+		display: grid;
+		place-items: center;
+		width: 64px;
+		height: 64px;
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		background: var(--accent-soft);
+		box-shadow: 0 0 26px color-mix(in srgb, var(--accent) 20%, transparent);
+	}
+
+	.brand-title-wrap {
+		position: relative;
+		display: inline-flex;
+		align-items: center;
+		padding-top: 0.8rem;
+	}
+
+	.brand-crown {
 		position: absolute;
-		top: 50%;
+		top: -18px;
 		left: 50%;
-		transform: translate(-50%, -50%);
-		width: 300px;
-		height: 300px;
-		background: radial-gradient(circle, rgba(246, 238, 220, 0.15) 0%, transparent 60%);
-		z-index: 0;
-		pointer-events: none;
+		transform: translateX(-50%);
+		width: 30px;
+		height: 30px;
+		object-fit: contain;
+		filter: drop-shadow(0 0 10px rgba(197, 155, 49, 0.8));
+		animation: crown-pop 2.8s ease-in-out infinite;
 	}
 
 	.brand-logo {
-		width: 240px;
-		position: relative;
-		z-index: 1;
-		filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.2));
+		width: 50px;
+		height: 50px;
+		object-fit: contain;
+		filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.24));
+	}
+
+	.brand-title {
+		font-family: 'Great Vibes', cursive;
+		color: var(--accent);
+		font-size: clamp(2.05rem, 3vw, 2.7rem);
+		line-height: 1;
+		white-space: nowrap;
 	}
 
 	.nav-gallery {
 		display: flex;
-		gap: 1.5rem;
-		height: 100%;
 		align-items: center;
+		justify-content: center;
+		gap: 0.9rem;
+		min-width: 0;
+		overflow-x: auto;
+		padding: 1rem 0.35rem 0.35rem;
 	}
 
 	.nav-card {
@@ -135,174 +205,183 @@
 		flex-direction: column;
 		justify-content: center;
 		align-items: center;
-		background: transparent;
-		border-radius: 16px;
-		padding: 1rem 1.5rem;
+		gap: 0.4rem;
+		min-width: 112px;
+		min-height: 108px;
+		padding: 0.7rem 0.85rem;
+		border-radius: 8px;
+		color: var(--muted);
 		text-decoration: none;
-		transition: all 0.3s ease;
-		height: 120px;
-		min-width: 140px;
+		font-weight: 700;
+		font-size: 0.88rem;
+		border: 1px solid transparent;
+		white-space: nowrap;
+		transition:
+			background 0.18s ease,
+			color 0.18s ease,
+			border-color 0.18s ease,
+			transform 0.18s ease;
 	}
 
 	.nav-card:hover {
-		background: rgba(28, 36, 56, 0.8);
 		transform: translateY(-2px);
 	}
 
+	.nav-card:hover,
 	.active-card {
-		background: linear-gradient(180deg, #1C2438 0%, rgba(11, 19, 43, 0) 100%);
-		border-bottom: 3px solid #D4AF37;
-		border-radius: 16px 16px 0 0;
+		background: var(--accent-soft);
+		border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+		color: var(--text);
 	}
 
 	.icon-container {
 		position: relative;
-		width: 75px;
-		height: 75px;
-		display: flex;
-		justify-content: center;
-		align-items: center;
-		margin-bottom: 0.5rem;
-		z-index: 2;
+		display: grid;
+		place-items: center;
+		width: 62px;
+		height: 62px;
 	}
 
-	.massive-icon {
-		width: 100%;
-		height: 100%;
+	.nav-icon {
+		width: 60px;
+		height: 60px;
 		object-fit: contain;
-		filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.6));
-		transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+		filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.34));
+		transition:
+			transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275),
+			filter 0.2s ease;
 	}
 
-	.nav-card:hover .massive-icon, .active-card .massive-icon {
-		transform: scale(1.15);
-		filter: drop-shadow(0 0 15px rgba(212, 175, 55, 0.5));
+	.nav-card:hover .nav-icon,
+	.active-card .nav-icon {
+		transform: scale(1.12);
+		filter: drop-shadow(0 0 15px color-mix(in srgb, var(--accent) 56%, transparent));
 	}
 
-	/* YENİ PURE CSS KRAL TACI ANİMASYONU */
 	.crown-icon {
 		position: absolute;
-		top: -22px;
-		width: 36px;
-		height: 36px;
+		top: -20px;
+		width: 34px;
+		height: 34px;
 		object-fit: contain;
-		z-index: 3;
-		filter: drop-shadow(0 0 12px rgba(212, 175, 55, 0.9));
-		
-		/* Başlangıçta görünmez ve küçültülmüş */
+		z-index: 2;
 		opacity: 0;
-		transform: scale(0.3);
-		/* Svelte elasticOut hissiyatını veren CSS transition */
-		transition: all 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+		transform: scale(0.3) translateY(8px);
+		filter: drop-shadow(0 0 12px rgba(197, 155, 49, 0.85));
+		transition: all 0.48s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 	}
 
-	/* Nav-card hover olduğunda veya sayfa aktifse taç büyüyerek belirir */
 	.nav-card:hover .crown-icon,
 	.crown-icon.is-active {
 		opacity: 1;
-		transform: scale(1);
+		transform: scale(1) translateY(0);
 	}
 
 	.nav-text {
-		color: #F6EEDC;
-		font-size: 0.95rem;
-		font-weight: 600;
-		letter-spacing: 0.5px;
-		z-index: 2;
-		transition: color 0.3s;
+		text-align: center;
+		line-height: 1.1;
 	}
 
-	.active-card .nav-text {
-		color: #D4AF37;
-		font-weight: 700;
-	}
-
-	.active-indicator {
-		position: absolute;
-		bottom: 0;
-		width: 100%;
-		height: 3px;
-		background: #D4AF37;
-		box-shadow: 0 -2px 10px rgba(212, 175, 55, 0.5);
-	}
-
-	/* SAĞ PROFİL VE İNCİ DAVET */
-	.profile-zone {
+	.top-actions {
 		display: flex;
 		align-items: center;
-		gap: 1.5rem;
+		justify-content: flex-end;
+		gap: 0.6rem;
 	}
 
-	.user-details {
-		display: flex;
-		flex-direction: column;
-		align-items: flex-end;
-		gap: 0.2rem;
-	}
-
-	.inci-brand-wrapper {
-		position: relative;
-		display: flex;
-		flex-direction: column;
+	.theme-toggle,
+	.logout-link {
+		display: inline-flex;
 		align-items: center;
-		margin-top: 15px;
-	}
-
-	.inci-text-crown {
-		position: absolute;
-		top: -22px;
-		left: 50%;
-		transform: translateX(-50%);
-		width: 28px;
-		height: 28px;
-		object-fit: contain;
-		z-index: 3;
-		filter: drop-shadow(0 0 8px rgba(212, 175, 55, 0.8));
-	}
-
-	.inci-text {
-		font-family: 'Great Vibes', cursive;
-		color: #D4AF37;
-		font-size: 2.2rem;
-		margin: 0;
-		font-weight: normal;
-		text-shadow: 0 0 15px rgba(212, 175, 55, 0.4);
-		line-height: 1;
-	}
-
-	.user-role {
-		color: #F6EEDC;
-		font-size: 0.85rem;
-		letter-spacing: 1px;
-		opacity: 0.8;
-	}
-
-	.profile-frame {
-		width: 80px;
-		height: 80px;
-		background: #0B132B;
-		border: 2px solid #D4AF37;
-		border-radius: 16px;
-		display: flex;
 		justify-content: center;
-		align-items: center;
-		padding: 6px;
-		box-shadow: 0 0 20px rgba(212, 175, 55, 0.3);
-		position: relative;
-		z-index: 2;
+		min-height: 40px;
+		border-radius: 8px;
+		padding: 0 0.9rem;
+		font-weight: 800;
+		font-size: 0.86rem;
+		text-decoration: none;
+		cursor: pointer;
 	}
 
-	.client-avatar {
-		width: 100%;
-		height: 100%;
-		object-fit: contain;
-		filter: drop-shadow(0 2px 5px rgba(0,0,0,0.5));
+	.theme-toggle {
+		color: var(--text);
+		background: var(--surface-strong);
+		border: 1px solid var(--line);
+	}
+
+	.logout-link {
+		color: #ffffff;
+		background: #b42318;
+		border: 1px solid #b42318;
 	}
 
 	.portal-content {
-		flex-grow: 1;
-		padding: 2.5rem;
-		overflow-y: auto;
-		background: radial-gradient(circle at top right, rgba(28, 36, 56, 0.6) 0%, #0B132B 100%);
+		min-height: calc(100vh - 142px);
+		padding: 1.5rem;
+		background:
+			linear-gradient(180deg, color-mix(in srgb, var(--surface-strong) 40%, transparent), transparent 320px),
+			var(--page);
+	}
+
+	@keyframes crown-pop {
+		0%,
+		100% {
+			transform: translateX(-50%) translateY(0) scale(1);
+		}
+		50% {
+			transform: translateX(-50%) translateY(-3px) scale(1.06);
+		}
+	}
+
+	@media (max-width: 1100px) {
+		.topbar {
+			grid-template-columns: 1fr auto;
+			min-height: auto;
+		}
+
+		.nav-gallery {
+			grid-column: 1 / -1;
+			justify-content: flex-start;
+		}
+	}
+
+	@media (max-width: 720px) {
+		.topbar {
+			padding: 0.85rem;
+		}
+
+		.top-actions {
+			gap: 0.35rem;
+		}
+
+		.brand-logo-wrap {
+			width: 52px;
+			height: 52px;
+		}
+
+		.brand-logo {
+			width: 40px;
+			height: 40px;
+		}
+
+		.nav-card {
+			min-width: 92px;
+			min-height: 94px;
+		}
+
+		.icon-container,
+		.nav-icon {
+			width: 48px;
+			height: 48px;
+		}
+
+		.theme-toggle,
+		.logout-link {
+			padding: 0 0.7rem;
+		}
+
+		.portal-content {
+			padding: 1rem;
+		}
 	}
 </style>

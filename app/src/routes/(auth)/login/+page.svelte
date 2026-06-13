@@ -1,28 +1,29 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { api, setToken } from '$lib/api';
 
-	// State yönetimi
-	let email: string = '';
-	let password: string = '';
-	let rememberMe: boolean = false;
-	let isLoading: boolean = false;
-	let errorMessage: string = '';
+	let email = $state('');
+	let password = $state('');
+	let rememberMe = $state(false);
+	let isLoading = $state(false);
+	let errorMessage = $state('');
 
-	// Form submit handler
-	const handleSubmit = () => {
+	const handleSubmit = async () => {
 		isLoading = true;
 		errorMessage = '';
-
-		// Mock backend request
-		setTimeout(() => {
-			if (email === 'admin@eventra.com' && password === '123456') {
-				document.cookie = 'token=mock-jwt-token-eventra; path=/; max-age=86400';
-				goto('/');
-			} else {
-				errorMessage = 'Hatalı e-posta veya şifre. (İpucu: admin@eventra.com / 123456)';
-				isLoading = false;
-			}
-		}, 1000);
+		try {
+			const data = await api.post<{ access_token: string; role: string; salon_id: string; username: string }>(
+				'/auth/token',
+				{ email, password }
+			);
+			setToken(data.access_token);
+			if (data.username) localStorage.setItem('eventra-username', data.username);
+			if (data.salon_id) localStorage.setItem('eventra-salon-id', data.salon_id);
+			goto('/');
+		} catch (err) {
+			errorMessage = err instanceof Error ? err.message : 'Giriş başarısız';
+			isLoading = false;
+		}
 	};
 </script>
 
@@ -33,7 +34,7 @@
 			<img src="/logo-yatay.png" alt="Eventra Logo" class="logo-image" />
 		</div>
 
-		<form on:submit|preventDefault={handleSubmit}>
+		<form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
 			<div class="input-group">
 				<label for="email">E-posta</label>
 				<input 
