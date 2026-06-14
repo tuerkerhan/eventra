@@ -1,3 +1,6 @@
+import calendar as _cal
+from datetime import date as _date, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -16,6 +19,23 @@ def _out(e: Expense) -> ExpenseOut:
     return out
 
 
+def _next_due(d: _date, recurrence: str, custom_days: int | None) -> _date:
+    if recurrence == "weekly":
+        return d + timedelta(days=7)
+    if recurrence == "monthly":
+        month = d.month % 12 + 1
+        year = d.year + (d.month // 12)
+        return d.replace(year=year, month=month, day=min(d.day, _cal.monthrange(year, month)[1]))
+    if recurrence == "yearly":
+        try:
+            return d.replace(year=d.year + 1)
+        except ValueError:
+            return d.replace(year=d.year + 1, day=28)
+    if recurrence == "custom" and custom_days:
+        return d + timedelta(days=custom_days)
+    return d
+
+
 @router.get("", response_model=list[ExpenseOut])
 def list_expenses(db: Session = Depends(get_db), user: SalonUser = Depends(get_current_user)):
     return [_out(e) for e in db.query(Expense).filter(Expense.salon_id == user.salon_id).order_by(Expense.due_date).all()]
@@ -24,16 +44,36 @@ def list_expenses(db: Session = Depends(get_db), user: SalonUser = Depends(get_c
 @router.post("", response_model=ExpenseOut)
 def create_expense(body: ExpenseIn, db: Session = Depends(get_db), user: SalonUser = Depends(get_current_user)):
     data = body.model_dump()
-    is_approved = data.pop("is_paid", False) or body.amount_type == "fixed"
-    expense = Expense(
-        salon_id=user.salon_id,
-        is_approved=body.amount_type == "fixed",
-        **data,
-    )
-    db.add(expense)
+    data.pop("is_paid", None)
+    is_approved = body.amount_type == "fixed"
+
+    start = _date.fromisoformat(body.due_date)
+    today_d = _date.today()
+
+    # Geçmiş tekrarlayan giderler için tüm geçmiş dönemleri otomatik oluştur
+    if body.recurrence != "once" and start < today_d:
+        due_dates: list[str] = []
+        d = start
+        while d <= today_d:
+            due_dates.append(d.isoformat())
+            d = _next_due(d, body.recurrence, body.custom_period_days)
+        due_dates.append(d.isoformat())  # sonraki gelecek dönem
+    else:
+        due_dates = [body.due_date]
+
+    last: Expense | None = None
+    for due_str in due_dates:
+        exp = Expense(
+            salon_id=user.salon_id,
+            is_approved=is_approved,
+            **{**data, "due_date": due_str},
+        )
+        db.add(exp)
+        last = exp
+
     db.commit()
-    db.refresh(expense)
-    return _out(expense)
+    db.refresh(last)  # type: ignore[arg-type]
+    return _out(last)  # type: ignore[arg-type]
 
 
 @router.patch("/{expense_id}", response_model=ExpenseOut)

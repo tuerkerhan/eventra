@@ -29,6 +29,7 @@
 	});
 
 	const menuItems = [
+		{ name: 'Ana Sayfa', path: '/', icon: '/anasayfa.png' },
 		{ name: 'Dashboard', path: '/dashboard', icon: '/dashboard-icon.png' },
 		{ name: 'Takvim', path: '/calendar', icon: '/takvim-icon.png' },
 		{ name: 'Randevular', path: '/customers', icon: '/musteriler-icon.png' },

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..core.deps import get_current_user
 from ..database import get_db
 from ..models import Event, EventCustomField, EventLayoutReservation, EventType, SalonUser, VenueLayout
+from ..models import PortalFormSubmission
 from ..schemas import (
     EventCustomFieldIn,
     EventIn,
@@ -14,6 +15,7 @@ from ..schemas import (
     EventTypeIn,
     EventTypeOut,
     EventUpdate,
+    PortalFormSubmissionOut,
 )
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -119,7 +121,7 @@ def create_event(body: EventIn, user: SalonUser = Depends(get_current_user), db:
     db.add(event)
     db.flush()
     for i, cf in enumerate(body.custom_fields):
-        db.add(EventCustomField(event_id=event.id, sort_order=i, **cf.model_dump()))
+        db.add(EventCustomField(event_id=event.id, **{**cf.model_dump(), 'sort_order': i}))
     _sync_layout_reservations(event, body.reserved_layout_ids, db)
     db.commit()
     db.refresh(event)
@@ -170,7 +172,7 @@ def update_event(
             db.delete(cf)
         db.flush()
         for i, cf in enumerate(body.custom_fields):
-            db.add(EventCustomField(event_id=event.id, sort_order=i, **cf.model_dump()))
+            db.add(EventCustomField(event_id=event.id, **{**cf.model_dump(), 'sort_order': i}))
 
     if body.reserved_layout_ids is not None:
         _sync_layout_reservations(event, body.reserved_layout_ids, db)
@@ -187,3 +189,11 @@ def delete_event(event_id: str, user: SalonUser = Depends(get_current_user), db:
         raise HTTPException(status_code=404, detail="Etkinlik bulunamadı")
     db.delete(event)
     db.commit()
+
+
+@router.get("/{event_id}/portal-submissions", response_model=list[PortalFormSubmissionOut])
+def list_portal_submissions(event_id: str, user: SalonUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    event = db.query(Event).filter(Event.id == event_id, Event.salon_id == user.salon_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Etkinlik bulunamadı")
+    return db.query(PortalFormSubmission).filter(PortalFormSubmission.event_id == event_id).order_by(PortalFormSubmission.submitted_at.desc()).all()

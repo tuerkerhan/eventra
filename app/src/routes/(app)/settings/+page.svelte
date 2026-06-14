@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, type SalonApi, type EventTypeApi, type OrgTypeFieldApi, type EventFormFieldDefApi } from '$lib/api';
+	import { api, type SalonApi, type EventTypeApi, type OrgTypeFieldApi, type EventFormFieldDefApi, type CustomerFormTypeApi, type CustomerFormTypeFieldApi } from '$lib/api';
 
 	type FieldType = 'text' | 'number' | 'date' | 'time' | 'textarea' | 'select' | 'checkbox';
 	const FIELD_TYPE_LABELS: Record<FieldType, string> = {
@@ -22,14 +22,13 @@
 	let saved = $state(false);
 	let loadError = $state('');
 
-	// Event types (org types)
-	let eventTypes = $state<EventTypeApi[]>([]);
-	let selectedTypeId = $state('');
-	let newTypeName = $state('');
-	let newTypeColor = $state('#64748b');
+	// Customer form types (portal form, no colors — separate from calendar EventType)
+	let customerFormTypes = $state<CustomerFormTypeApi[]>([]);
+	let selectedFormTypeId = $state('');
+	let newFormTypeName = $state('');
 
-	// Org type fields
-	let orgFields = $state<OrgTypeFieldApi[]>([]);
+	// Customer form type fields
+	let formTypeFields = $state<CustomerFormTypeFieldApi[]>([]);
 	let newFieldLabel = $state('');
 	let newFieldType = $state<FieldType>('text');
 	let newFieldOptions = $state('');
@@ -42,34 +41,34 @@
 	let newEfTag = $state('');
 	let newEfOptions = $state('');
 
-	const selectedType = $derived(eventTypes.find(t => t.id === selectedTypeId) ?? null);
+	const selectedFormType = $derived(customerFormTypes.find(t => t.id === selectedFormTypeId) ?? null);
 
 	onMount(async () => {
 		try {
-			const [s, types, ffdefs] = await Promise.all([
+			const [s, cfTypes, ffdefs] = await Promise.all([
 				api.get<SalonApi>('/settings/salon'),
-				api.get<EventTypeApi[]>('/events/types'),
+				api.get<CustomerFormTypeApi[]>('/customer-forms/types'),
 				api.get<EventFormFieldDefApi[]>('/event-form-fields')
 			]);
 			salon = { ...s };
-			eventTypes = types;
+			customerFormTypes = cfTypes;
 			formFieldDefs = ffdefs;
-			if (types.length > 0) {
-				selectedTypeId = types[0].id;
-				await loadOrgFields(types[0].id);
+			if (cfTypes.length > 0) {
+				selectedFormTypeId = cfTypes[0].id;
+				await loadFormTypeFields(cfTypes[0].id);
 			}
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Yükleme hatası';
 		}
 	});
 
-	async function loadOrgFields(typeId: string) {
-		orgFields = await api.get<OrgTypeFieldApi[]>(`/settings/org-type-fields?event_type_id=${typeId}`);
+	async function loadFormTypeFields(typeId: string) {
+		formTypeFields = await api.get<CustomerFormTypeFieldApi[]>(`/customer-forms/fields?type_id=${typeId}`);
 	}
 
-	async function selectType(id: string) {
-		selectedTypeId = id;
-		await loadOrgFields(id);
+	async function selectFormType(id: string) {
+		selectedFormTypeId = id;
+		await loadFormTypeFields(id);
 	}
 
 	async function saveSalon() {
@@ -92,50 +91,49 @@
 		}
 	}
 
-	async function addEventType() {
-		const name = newTypeName.trim();
+	async function addFormType() {
+		const name = newFormTypeName.trim();
 		if (!name) return;
-		const t = await api.post<EventTypeApi>('/events/types', { name, color: newTypeColor });
-		eventTypes = [...eventTypes, t];
-		newTypeName = '';
-		newTypeColor = '#64748b';
-		await selectType(t.id);
+		const t = await api.post<CustomerFormTypeApi>('/customer-forms/types', { name });
+		customerFormTypes = [...customerFormTypes, t];
+		newFormTypeName = '';
+		await selectFormType(t.id);
 	}
 
-	async function deleteEventType(id: string) {
-		if (!confirm('Bu organizasyon tipini sil?')) return;
-		await api.del(`/events/types/${id}`);
-		eventTypes = eventTypes.filter(t => t.id !== id);
-		if (selectedTypeId === id) {
-			selectedTypeId = eventTypes[0]?.id ?? '';
-			if (selectedTypeId) await loadOrgFields(selectedTypeId);
-			else orgFields = [];
+	async function deleteFormType(id: string) {
+		if (!confirm('Bu form tipini sil?')) return;
+		await api.del(`/customer-forms/types/${id}`);
+		customerFormTypes = customerFormTypes.filter(t => t.id !== id);
+		if (selectedFormTypeId === id) {
+			selectedFormTypeId = customerFormTypes[0]?.id ?? '';
+			if (selectedFormTypeId) await loadFormTypeFields(selectedFormTypeId);
+			else formTypeFields = [];
 		}
 	}
 
-	async function addOrgField() {
+	async function addFormTypeField() {
 		const label = newFieldLabel.trim();
-		if (!label || !selectedTypeId) return;
+		if (!label || !selectedFormTypeId) return;
 		const slug = label.toLocaleLowerCase('tr-TR').replaceAll(' ', '_').replace(/[^a-z0-9_]/gi, '');
 		const options = newFieldOptions.split(',').map(s => s.trim()).filter(Boolean);
-		const f = await api.post<OrgTypeFieldApi>('/settings/org-type-fields', {
-			event_type_id: selectedTypeId,
-			key: slug || `field_${orgFields.length + 1}`,
+		const f = await api.post<CustomerFormTypeFieldApi>('/customer-forms/fields', {
+			customer_form_type_id: selectedFormTypeId,
+			key: slug || `field_${formTypeFields.length + 1}`,
 			label,
 			field_type: newFieldType,
 			options,
 			is_required: newFieldRequired,
-			sort_order: orgFields.length
+			sort_order: formTypeFields.length
 		});
-		orgFields = [...orgFields, f];
+		formTypeFields = [...formTypeFields, f];
 		newFieldLabel = '';
 		newFieldOptions = '';
 		newFieldRequired = false;
 	}
 
-	async function deleteOrgField(id: string) {
-		await api.del(`/settings/org-type-fields/${id}`);
-		orgFields = orgFields.filter(f => f.id !== id);
+	async function deleteFormTypeField(id: string) {
+		await api.del(`/customer-forms/fields/${id}`);
+		formTypeFields = formTypeFields.filter(f => f.id !== id);
 	}
 
 	// ── Event form field def actions ─────────────────────────────────────────
@@ -202,59 +200,56 @@
 			</section>
 
 			<section class="panel org-panel">
-				<h2>Organizasyon Tipleri & Portal Alanları</h2>
-				<p class="hint">Her organizasyon tipine göre müşterinin portalde dolduracağı alanları tanımla.</p>
+				<h2>Müşteri Formu</h2>
+				<p class="hint">Müşteri portalinde gösterilecek form tiplerini ve alanlarını tanımla. Takvim etkinlik tiplerinden bağımsızdır.</p>
 
 				<div class="type-tabs">
-					{#each eventTypes as t}
+					{#each customerFormTypes as t}
 						<div
-							class="type-tab"
-							class:active={selectedTypeId === t.id}
-							style="--c:{t.color}"
+							class="type-tab no-color"
+							class:active={selectedFormTypeId === t.id}
 							role="button"
 							tabindex="0"
-							onclick={() => selectType(t.id)}
-							onkeydown={(e) => e.key === 'Enter' && selectType(t.id)}
+							onclick={() => selectFormType(t.id)}
+							onkeydown={(e) => e.key === 'Enter' && selectFormType(t.id)}
 						>
-							<span class="dot" style="background:{t.color}"></span>
 							{t.name}
-							<button class="del-type" onclick={(e) => { e.stopPropagation(); deleteEventType(t.id); }}>×</button>
+							<button class="del-type" onclick={(e) => { e.stopPropagation(); deleteFormType(t.id); }}>×</button>
 						</div>
 					{/each}
+					{#if customerFormTypes.length === 0}
+						<p class="empty-hint">Henüz form tipi eklenmemiş.</p>
+					{/if}
 				</div>
 
-				<div class="inline-add type-add">
-					<input placeholder="Yeni organizasyon tipi" bind:value={newTypeName} onkeydown={(e) => e.key === 'Enter' && addEventType()} />
-					<input class="color-input" type="color" bind:value={newTypeColor} />
-					<button onclick={addEventType}>Ekle</button>
+				<div class="inline-add type-add-nocolor">
+					<input placeholder="Yeni form tipi (örn: Düğün, Nişan)" bind:value={newFormTypeName} onkeydown={(e) => e.key === 'Enter' && addFormType()} />
+					<button onclick={addFormType}>Ekle</button>
 				</div>
 
-				{#if selectedType}
+				{#if selectedFormType}
 					<div class="fields-section">
-						<h3>
-							<span class="dot" style="background:{selectedType.color}"></span>
-							{selectedType.name} — Portal Alanları
-						</h3>
+						<h3>{selectedFormType.name} — Form Alanları</h3>
 
-						{#if orgFields.length === 0}
-							<p class="empty-hint">Bu tip için henüz portal alanı eklenmemiş.</p>
+						{#if formTypeFields.length === 0}
+							<p class="empty-hint">Bu form tipi için henüz alan eklenmemiş.</p>
 						{:else}
 							<div class="field-list">
-								{#each orgFields as f}
+								{#each formTypeFields as f}
 									<div class="field-row">
 										<div class="field-info">
 											<strong>{f.label}</strong>
 											<span>{FIELD_TYPE_LABELS[f.field_type as FieldType] ?? f.field_type}{f.is_required ? ' · Zorunlu' : ''}</span>
 											{#if f.options?.length > 0}<small>Seçenekler: {f.options.join(', ')}</small>{/if}
 										</div>
-										<button class="del-btn" onclick={() => deleteOrgField(f.id)}>Sil</button>
+										<button class="del-btn" onclick={() => deleteFormTypeField(f.id)}>Sil</button>
 									</div>
 								{/each}
 							</div>
 						{/if}
 
 						<div class="field-add-form">
-							<label><span>Alan Adı</span><input placeholder="Örn: Masa düzeni tercihi" bind:value={newFieldLabel} onkeydown={(e) => e.key === 'Enter' && addOrgField()} /></label>
+							<label><span>Alan Adı</span><input placeholder="Örn: Masa düzeni tercihi" bind:value={newFieldLabel} onkeydown={(e) => e.key === 'Enter' && addFormTypeField()} /></label>
 							<label><span>Tip</span>
 								<select bind:value={newFieldType}>
 									{#each Object.entries(FIELD_TYPE_LABELS) as [val, lbl]}
@@ -269,7 +264,7 @@
 								<input type="checkbox" bind:checked={newFieldRequired} />
 								Zorunlu alan
 							</label>
-							<button class="add-field-btn" onclick={addOrgField}>Alan Ekle</button>
+							<button class="add-field-btn" onclick={addFormTypeField}>Alan Ekle</button>
 						</div>
 					</div>
 				{/if}
@@ -366,13 +361,13 @@
 	.hint { color: var(--muted); font-size: 0.82rem; }
 	.type-tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 	.type-tab { display: flex; align-items: center; gap: 0.4rem; padding: 0.5rem 0.85rem; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-strong); color: var(--text); font-weight: 800; font-size: 0.82rem; cursor: pointer; transition: all 0.15s; }
-	.type-tab:hover, .type-tab.active { border-color: var(--c); background: color-mix(in srgb, var(--c) 14%, var(--surface-strong)); }
+	.type-tab:hover, .type-tab.active { border-color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 14%, var(--surface-strong)); }
+	.type-tab.no-color:hover, .type-tab.no-color.active { border-color: var(--accent); background: var(--accent-soft); }
 	.del-type { margin-left: 0.3rem; background: transparent; border: 0; color: var(--muted); cursor: pointer; font-size: 1rem; line-height: 1; padding: 0; }
 	.del-type:hover { color: var(--danger); }
-	.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 	.inline-add { display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; }
-	.type-add button { border: 0; border-radius: 7px; padding: 0.55rem 0.85rem; background: var(--accent); color: #fff; font-weight: 900; cursor: pointer; white-space: nowrap; }
-	.color-input { width: 42px; height: 38px; min-height: 38px; border: 0; padding: 0; background: transparent; cursor: pointer; }
+	.type-add-nocolor { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; }
+	.type-add-nocolor button { border: 0; border-radius: 7px; padding: 0.55rem 0.85rem; background: var(--accent); color: #fff; font-weight: 900; cursor: pointer; white-space: nowrap; }
 	.fields-section { display: flex; flex-direction: column; gap: 0.85rem; padding-top: 0.85rem; border-top: 1px solid var(--line); }
 	.field-list { display: flex; flex-direction: column; gap: 0.5rem; }
 	.field-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.65rem; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 8px; }

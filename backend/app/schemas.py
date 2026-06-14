@@ -251,6 +251,7 @@ class EventIn(BaseModel):
     # Portal
     portal_enabled: bool = False
     portal_org_type_id: str | None = None
+    portal_form_type_id: str | None = None
     portal_layout_permission: bool = False
     reserved_layout_ids: list[str] = []
     custom_fields: list[EventCustomFieldIn] = []
@@ -319,6 +320,7 @@ class EventOut(BaseModel):
     portal_token: str | None
     portal_enabled: bool
     portal_org_type_id: str | None
+    portal_form_type_id: str | None
     portal_layout_permission: bool
     reserved_layout_ids: list[str] = []
     custom_fields: list[EventCustomFieldOut] = []
@@ -536,5 +538,50 @@ class ExpenseOut(BaseModel):
     include_kdv: bool
     note: str
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Customer Form Types ──────────────────────────────────────────────────────
+
+class CustomerFormTypeIn(BaseModel):
+    name: str
+
+
+class CustomerFormTypeOut(BaseModel):
+    id: str
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class CustomerFormTypeFieldIn(BaseModel):
+    customer_form_type_id: str
+    key: str
+    label: str
+    field_type: str = "text"
+    options: list[str] = []
+    is_required: bool = False
+    sort_order: int = 0
+
+
+class CustomerFormTypeFieldOut(BaseModel):
+    id: str
+    customer_form_type_id: str
+    key: str
+    label: str
+    field_type: str
+    options: list[str]
+    is_required: bool
+    sort_order: int
+
+    model_config = {"from_attributes": True}
+
+
+class PortalFormSubmissionOut(BaseModel):
+    id: str
+    event_id: str
+    submitted_at: datetime
+    data: dict
 
     model_config = {"from_attributes": True}

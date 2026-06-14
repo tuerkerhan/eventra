@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
-from ..models import Event, GuestSeating, OrgTypeField, Salon, VenueLayout
+from ..models import CustomerFormTypeField, Event, GuestSeating, OrgTypeField, PortalFormSubmission, Salon, VenueLayout
 from ..schemas import (
     GuestSeatOut,
     OrgTypeFieldOut,
@@ -34,9 +34,26 @@ def get_portal_info(token: str, db: Session = Depends(get_db)):
     event = _get_event_by_token(token, db)
     salon = db.query(Salon).filter(Salon.id == event.salon_id).first()
 
-    # Get org-type-specific form fields
+    # Get form fields — prefer new CustomerFormType system over legacy OrgTypeField
     form_fields = []
-    if event.portal_org_type_id:
+    if event.portal_form_type_id:
+        fields = (
+            db.query(CustomerFormTypeField)
+            .filter(
+                CustomerFormTypeField.salon_id == event.salon_id,
+                CustomerFormTypeField.customer_form_type_id == event.portal_form_type_id,
+            )
+            .order_by(CustomerFormTypeField.sort_order)
+            .all()
+        )
+        form_fields = [
+            PortalFormFieldOut(
+                id=f.id, key=f.key, label=f.label, field_type=f.field_type,
+                options=f.options or [], is_required=f.is_required, sort_order=f.sort_order
+            )
+            for f in fields
+        ]
+    elif event.portal_org_type_id:
         fields = (
             db.query(OrgTypeField)
             .filter(
@@ -86,10 +103,8 @@ def get_portal_info(token: str, db: Session = Depends(get_db)):
 @router.post("/{token}/form")
 def submit_form(token: str, body: PortalFormSubmit, db: Session = Depends(get_db)):
     event = _get_event_by_token(token, db)
-    import json
-    existing_note = event.note or ""
-    form_note = f"\n\n[Portal Form]\n{json.dumps(body.data, ensure_ascii=False, indent=2)}"
-    event.note = existing_note + form_note
+    submission = PortalFormSubmission(event_id=event.id, data=body.data)
+    db.add(submission)
     db.commit()
     return {"ok": True}
 

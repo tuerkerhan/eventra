@@ -172,6 +172,7 @@ class Event(Base):
     portal_token = Column(String, unique=True, nullable=True)
     portal_enabled = Column(Boolean, default=False)
     portal_org_type_id = Column(String, ForeignKey("event_types.id"), nullable=True)
+    portal_form_type_id = Column(String, nullable=True)  # references customer_form_types.id
     portal_layout_permission = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -182,6 +183,46 @@ class Event(Base):
     custom_fields = relationship("EventCustomField", back_populates="event", cascade="all, delete-orphan")
     guest_seatings = relationship("GuestSeating", back_populates="event", cascade="all, delete-orphan")
     layout_reservations = relationship("EventLayoutReservation", back_populates="event", cascade="all, delete-orphan")
+    portal_submissions = relationship("PortalFormSubmission", back_populates="event", cascade="all, delete-orphan")
+
+
+class CustomerFormType(Base):
+    """Customer portal form types — separate from calendar EventType (no color)."""
+    __tablename__ = "customer_form_types"
+    id = Column(String, primary_key=True, default=_uuid)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    name = Column(String, nullable=False)
+
+    salon = relationship("Salon")
+    fields = relationship("CustomerFormTypeField", back_populates="form_type", cascade="all, delete-orphan")
+
+
+class CustomerFormTypeField(Base):
+    """Fields for each customer form type (shown in portal form)."""
+    __tablename__ = "customer_form_type_fields"
+    id = Column(String, primary_key=True, default=_uuid)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    customer_form_type_id = Column(String, ForeignKey("customer_form_types.id"), nullable=False)
+    key = Column(String, nullable=False)
+    label = Column(String, nullable=False)
+    field_type = Column(String, default="text")
+    options = Column(JSON, default=list)
+    is_required = Column(Boolean, default=False)
+    sort_order = Column(Integer, default=0)
+
+    salon = relationship("Salon")
+    form_type = relationship("CustomerFormType", back_populates="fields")
+
+
+class PortalFormSubmission(Base):
+    """Stores customer form submissions from the portal."""
+    __tablename__ = "portal_form_submissions"
+    id = Column(String, primary_key=True, default=_uuid)
+    event_id = Column(String, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    submitted_at = Column(DateTime, default=datetime.utcnow)
+    data = Column(JSON, default=dict)
+
+    event = relationship("Event", back_populates="portal_submissions")
 
 
 class EventLayoutReservation(Base):
