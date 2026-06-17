@@ -33,6 +33,19 @@ class Salon(Base):
     max_users = Column(Integer, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
     created_by_admin = Column(String, ForeignKey("admin_users.id"), nullable=True)
+    # Payment info (bank details configured salon-wide; per-event toggle is on Event model)
+    payment_bank_name = Column(String, default="")
+    payment_iban = Column(String, default="")
+    payment_account_holder = Column(String, default="")
+    payment_description = Column(Text, default="")
+    # SMTP / e-posta
+    smtp_host = Column(String, default="")
+    smtp_port = Column(Integer, default=587)
+    smtp_username = Column(String, default="")
+    smtp_password = Column(String, default="")
+    smtp_from_email = Column(String, default="")
+    smtp_use_tls = Column(Boolean, default=True)
+    notification_email = Column(String, default="")
 
     users = relationship("SalonUser", back_populates="salon", cascade="all, delete-orphan")
     customers = relationship("Customer", back_populates="salon", cascade="all, delete-orphan")
@@ -162,15 +175,24 @@ class Event(Base):
     kapora_paid = Column(Boolean, default=False)
     total_paid = Column(Float, default=0)
     payment_complete = Column(Boolean, default=False)
+    email = Column(String, default="")
+    portal_message = Column(Text, default="")
     note = Column(Text, default="")
     reminder_enabled = Column(Boolean, default=False)
     reminder_date = Column(String, default="")
     staff = Column(String, default="")
     layout_id = Column(String, ForeignKey("venue_layouts.id"), nullable=True)
     seating_enabled = Column(Boolean, default=False)
+    # Appointment number (auto-increment per salon)
+    appointment_no = Column(Integer, nullable=True)
+    # Per-event payment toggle (portal shows payment section only when True)
+    payment_enabled = Column(Boolean, default=False)
+    # Customer payment claim (customer said they paid via portal)
+    customer_payment_claimed = Column(Boolean, default=False)
     # Portal fields
     portal_token = Column(String, unique=True, nullable=True)
     portal_enabled = Column(Boolean, default=False)
+    portal_title = Column(String, default="Davetiniz")
     portal_org_type_id = Column(String, ForeignKey("event_types.id"), nullable=True)
     portal_form_type_id = Column(String, nullable=True)  # references customer_form_types.id
     portal_layout_permission = Column(Boolean, default=False)
@@ -184,6 +206,7 @@ class Event(Base):
     guest_seatings = relationship("GuestSeating", back_populates="event", cascade="all, delete-orphan")
     layout_reservations = relationship("EventLayoutReservation", back_populates="event", cascade="all, delete-orphan")
     portal_submissions = relationship("PortalFormSubmission", back_populates="event", cascade="all, delete-orphan")
+    payment_installments = relationship("PaymentInstallment", cascade="all, delete-orphan", order_by="PaymentInstallment.created_at")
 
 
 class CustomerFormType(Base):
@@ -312,6 +335,31 @@ class EventFormFieldDef(Base):
     salon = relationship("Salon", back_populates="event_form_field_defs")
 
 
+class EventTypeFieldDef(Base):
+    """Per-event-type extra field definitions for the INTERNAL reservation form (not the guest portal)."""
+    __tablename__ = "event_type_field_defs"
+    id = Column(String, primary_key=True, default=_uuid)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    event_type_id = Column(String, ForeignKey("event_types.id"), nullable=False)
+    key = Column(String, nullable=False)
+    label = Column(String, nullable=False)
+    field_type = Column(String, default="text")    # text|number|date|time|textarea|select|checkbox
+    options = Column(JSON, default=list)
+    is_required = Column(Boolean, default=False)
+    sort_order = Column(Integer, default=0)
+
+
+class PaymentInstallment(Base):
+    """Ara ödeme log — a partial payment added to an event's total_paid."""
+    __tablename__ = "payment_installments"
+    id = Column(String, primary_key=True, default=_uuid)
+    event_id = Column(String, ForeignKey("events.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    added_by_user_id = Column(String, ForeignKey("salon_users.id"), nullable=True)
+    added_by_name = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ContractTemplate(Base):
     __tablename__ = "contract_templates"
     id = Column(String, primary_key=True, default=_uuid)
@@ -344,6 +392,21 @@ class Expense(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     salon = relationship("Salon", back_populates="expenses")
+    event = relationship("Event")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(String, primary_key=True, default=_uuid)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    event_id = Column(String, ForeignKey("events.id", ondelete="SET NULL"), nullable=True)
+    type = Column(String, nullable=False)  # payment_claimed | payment_confirmed | email_sent | email_failed
+    title = Column(String, default="")
+    message = Column(Text, default="")
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    salon = relationship("Salon")
     event = relationship("Event")
 
 

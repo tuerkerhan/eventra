@@ -3,6 +3,17 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Frontend dependencies and generated output
+node_modules/
+.svelte-kit/
+.output/
+.vercel/
+.netlify/
+.wrangler/
+
+# Runtime/user uploads
+backend/uploads/
+
 # C extensions
 *.so
 

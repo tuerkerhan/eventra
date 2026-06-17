@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from ..core.deps import get_current_user
 from ..database import get_db
+from ..email_utils import send_email
 from ..models import CustomerFieldDef, OrgTypeField, PortalFormField, Salon, SalonUser
 from ..schemas import (
     CustomerFieldDefIn,
@@ -13,6 +14,7 @@ from ..schemas import (
     PortalFormFieldOut,
     SalonOut,
     SalonUpdateIn,
+    SmtpTestIn,
     UserPrefsOut,
     UserPrefsUpdate,
 )
@@ -58,6 +60,21 @@ def update_salon_settings(
     db.commit()
     db.refresh(salon)
     return salon
+
+
+@router.post("/smtp-test")
+def smtp_test(
+    body: SmtpTestIn,
+    user: SalonUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    salon = _get_salon(user, db)
+    overrides = body.model_dump(exclude={"to_email"}, exclude_none=True)
+    for k, v in overrides.items():
+        setattr(salon, k, v)
+    to_email = body.to_email or salon.notification_email
+    ok, detail = send_email(salon, to_email, "Eventra SMTP Test", "Bu bir test mailidir. SMTP ayarlarınız çalışıyor.")
+    return {"ok": ok, "detail": detail}
 
 
 # ─── Customer field definitions ──────────────────────────────────────────────

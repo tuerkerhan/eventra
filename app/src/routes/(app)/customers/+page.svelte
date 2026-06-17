@@ -64,6 +64,9 @@
 					const tn = typeName(ev.type_id);
 					if (tn.toLocaleLowerCase('tr-TR').includes(q)) return true;
 				}
+				if (filterField === 'all' || filterField === 'appt_no') {
+					if (ev.appointment_no && String(ev.appointment_no).includes(searchQuery.trim())) return true;
+				}
 				return false;
 			});
 		}
@@ -98,7 +101,6 @@
 <section class="page-shell">
 	<div class="page-heading">
 		<div>
-			<p class="eyebrow">Randevular</p>
 			<h1>Davet Listesi</h1>
 		</div>
 		<a href="/calendar" class="new-btn">+ Yeni Davet</a>
@@ -114,6 +116,7 @@
 				<input class="search" type="search" placeholder="Ara…" bind:value={searchQuery} />
 				<select bind:value={filterField}>
 					<option value="all">Tüm alanlar</option>
+					<option value="appt_no">Randevu No</option>
 					<option value="title">Başlık</option>
 					<option value="name">İsim</option>
 					<option value="phone">Telefon</option>
@@ -131,6 +134,7 @@
 				<table>
 					<thead>
 						<tr>
+							<th>#</th>
 							<th>Tarih & Saat</th>
 							<th>Tip</th>
 							<th>Durum</th>
@@ -154,6 +158,13 @@
 								onkeydown={(e) => e.key === 'Enter' && openDetail(ev)}
 							>
 								<td>
+									{#if ev.appointment_no}
+										<span class="appt-no">#{ev.appointment_no}</span>
+									{:else}
+										<span class="muted">—</span>
+									{/if}
+								</td>
+								<td>
 									<div class="date-cell">
 										<strong>{formatDate(ev.event_date)}</strong>
 										<span>{ev.start_time} – {ev.end_time}</span>
@@ -170,7 +181,11 @@
 								<td>
 									<div class="name-cell">
 										<strong>{ev.full_name || ev.title}</strong>
-										{#if ev.bride_groom}<span>{ev.bride_groom}</span>{/if}
+										{#if ev.portal_title && ev.portal_title !== 'Davetiniz'}
+											<span class="portal-title-tag">{ev.portal_title}</span>
+										{:else if ev.bride_groom}
+											<span>{ev.bride_groom}</span>
+										{/if}
 									</div>
 								</td>
 								<td>{ev.mobile_phone || ev.phone || '—'}</td>
@@ -189,7 +204,7 @@
 							</tr>
 						{/each}
 						{#if filteredEvents().length === 0}
-							<tr><td colspan="11" class="empty">Kayıt bulunamadı.</td></tr>
+							<tr><td colspan="12" class="empty">Kayıt bulunamadı.</td></tr>
 						{/if}
 					</tbody>
 				</table>
@@ -210,8 +225,14 @@
 				<div class="detail-section">
 					<h3>Genel Bilgiler</h3>
 					<div class="info-grid">
+						{#if selectedEvent.appointment_no}
+							<div class="info-row"><span>Randevu No</span><strong class="appt-no-lg">#{selectedEvent.appointment_no}</strong></div>
+						{/if}
 						<div class="info-row"><span>Tarih</span><strong>{formatDate(selectedEvent.event_date)}</strong></div>
 						<div class="info-row"><span>Saat</span><strong>{selectedEvent.start_time} – {selectedEvent.end_time}</strong></div>
+						{#if selectedEvent.portal_title && selectedEvent.portal_title !== 'Davetiniz'}
+							<div class="info-row"><span>Portal Başlığı</span><strong>{selectedEvent.portal_title}</strong></div>
+						{/if}
 						{#if selectedEvent.bride_groom}
 							<div class="info-row"><span>Gelin & Damat</span><strong>{selectedEvent.bride_groom}</strong></div>
 						{/if}
@@ -347,7 +368,6 @@
 <style>
 	.page-shell { max-width: 1920px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
 	h1, h2, p { margin: 0; }
-	.eyebrow { margin-bottom: 0.25rem; color: var(--accent); font-size: 0.78rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
 	.page-heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
 	.new-btn { padding: 0.75rem 1.25rem; background: var(--accent); color: #fff; border-radius: 8px; text-decoration: none; font-weight: 900; white-space: nowrap; }
 	.error-bar { padding: 0.75rem 1rem; background: color-mix(in srgb, #ef4444 12%, transparent); border: 1px solid #ef4444; border-radius: 8px; color: #ef4444; font-weight: 800; font-size: 0.85rem; }
@@ -385,7 +405,10 @@
 	.badge-blue { background: color-mix(in srgb, #2563eb 14%, transparent); color: #2563eb; }
 	.badge-amber { background: color-mix(in srgb, #f59e0b 14%, transparent); color: #f59e0b; }
 	.portal-pill { display: inline-flex; padding: 0.28rem 0.55rem; border-radius: 5px; font-size: 0.74rem; font-weight: 900; background: color-mix(in srgb, #2563eb 14%, transparent); color: #2563eb; }
+	.portal-title-tag { font-size: 0.75rem; color: var(--accent); font-style: italic; }
 	.muted { color: var(--muted); font-size: 0.82rem; }
+	.appt-no { font-size: 0.78rem; font-weight: 900; color: var(--accent); background: var(--accent-soft); padding: 0.15rem 0.45rem; border-radius: 5px; white-space: nowrap; }
+	.appt-no-lg { color: var(--accent); font-size: 0.92rem; }
 	.empty { text-align: center; color: var(--muted); padding: 2rem; font-style: italic; }
 
 	/* Detail panel */

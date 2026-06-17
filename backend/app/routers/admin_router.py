@@ -7,7 +7,7 @@ from ..core.config import settings
 from ..core.deps import get_current_admin
 from ..core.security import create_access_token, hash_password, verify_password
 from ..database import get_db
-from ..models import AdminUser, EventType, Salon, SalonUser
+from ..models import AdminUser, EventType, EventTypeFieldDef, Salon, SalonUser, VenueLayout
 from ..schemas import (
     AdminCreateIn,
     LoginIn,
@@ -62,8 +62,22 @@ def create_salon(body: SalonCreateIn, db: Session = Depends(get_db), admin: Admi
     db.flush()
 
     # Create default event types
+    dugun_type = None
     for name, color in DEFAULT_EVENT_TYPES:
-        db.add(EventType(salon_id=salon.id, name=name, color=color))
+        et = EventType(salon_id=salon.id, name=name, color=color)
+        db.add(et)
+        if name == "Düğün":
+            dugun_type = et
+    db.flush()
+    if dugun_type:
+        db.add(EventTypeFieldDef(
+            salon_id=salon.id, event_type_id=dugun_type.id,
+            key="gelin_damat", label="Gelin ve Damat", field_type="text", sort_order=0,
+        ))
+
+    # Create default salons (rooms)
+    for room_name in ("Salon A", "Salon B", "Salon C"):
+        db.add(VenueLayout(salon_id=salon.id, name=room_name))
 
     # Create owner user
     owner = SalonUser(

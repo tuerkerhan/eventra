@@ -19,8 +19,15 @@ def list_layouts(user: SalonUser = Depends(get_current_user), db: Session = Depe
     )
 
 
+MAX_LAYOUTS_PER_SALON = 3
+
+
 @router.post("/layouts", response_model=VenueLayoutOut)
 def create_layout(body: VenueLayoutIn, user: SalonUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    existing_count = db.query(VenueLayout).filter(VenueLayout.salon_id == user.salon_id).count()
+    if existing_count >= MAX_LAYOUTS_PER_SALON:
+        raise HTTPException(status_code=400, detail=f"En fazla {MAX_LAYOUTS_PER_SALON} salon oluşturulabilir")
+
     layout = VenueLayout(
         salon_id=user.salon_id,
         name=body.name,

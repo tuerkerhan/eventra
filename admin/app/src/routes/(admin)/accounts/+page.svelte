@@ -210,8 +210,12 @@
 
 <!-- Create Salon Modal -->
 {#if showCreateSalon}
-	<div class="modal-backdrop" onclick={() => (showCreateSalon = false)} role="dialog" aria-modal="true" aria-label="Yeni salon oluştur">
-		<div class="modal" onclick={(e) => e.stopPropagation()} role="document">
+	<div class="modal-backdrop" onclick={(e) => {
+		if (e.target === e.currentTarget) showCreateSalon = false;
+	}} onkeydown={(e) => {
+		if (e.key === 'Escape') showCreateSalon = false;
+	}} role="dialog" aria-modal="true" aria-label="Yeni salon oluştur" tabindex="-1">
+		<div class="modal" role="document">
 			<h2>Yeni Salon Oluştur</h2>
 
 			{#if createError}
@@ -263,8 +267,12 @@
 
 <!-- Add User Modal -->
 {#if showAddUser && selectedSalon}
-	<div class="modal-backdrop" onclick={() => (showAddUser = false)} role="dialog" aria-modal="true" aria-label="Kullanıcı ekle">
-		<div class="modal" onclick={(e) => e.stopPropagation()} role="document">
+	<div class="modal-backdrop" onclick={(e) => {
+		if (e.target === e.currentTarget) showAddUser = false;
+	}} onkeydown={(e) => {
+		if (e.key === 'Escape') showAddUser = false;
+	}} role="dialog" aria-modal="true" aria-label="Kullanıcı ekle" tabindex="-1">
+		<div class="modal" role="document">
 			<h2>{selectedSalon.name} – Kullanıcı Ekle</h2>
 			<p class="muted">Bu salona yeni bir kullanıcı ekleyin. ({salonUsers.length}/{selectedSalon.max_users} kullanıcı)</p>
 

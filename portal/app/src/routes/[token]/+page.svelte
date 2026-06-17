@@ -27,6 +27,16 @@
 		portal_layout_permission: boolean;
 		reserved_layouts: LayoutInfo[];
 		form_fields: FormField[];
+		portal_title: string;
+		appointment_no: number | null;
+		payment_enabled: boolean;
+		payment_bank_name: string;
+		payment_iban: string;
+		payment_account_holder: string;
+		payment_description: string;
+		payment_complete: boolean;
+		customer_payment_claimed: boolean;
+		portal_message: string;
 	}
 
 	const token = $derived($page.params.token);
@@ -38,6 +48,8 @@
 	let submitting = $state(false);
 	let submitted = $state(false);
 	let mounted = $state(false);
+	let paymentClaiming = $state(false);
+	let paymentClaimed = $state(false);
 
 	// Sparkle particles
 	const sparkles = Array.from({ length: 22 }, (_, i) => ({
@@ -96,6 +108,28 @@
 	}
 
 	function goToSeating(layoutId: string) { goto(`/${token}/seating?layout=${layoutId}`); }
+
+	function buildPaymentDescription(info: PortalInfo): string {
+		if (!info.payment_description) return '';
+		const name = info.bride_groom || info.salon_name || '';
+		return info.payment_description
+			.replace(/\{randevu_id\}/g, info.appointment_no ? String(info.appointment_no) : '—')
+			.replace(/\{isim\}/g, name);
+	}
+
+	async function claimPayment() {
+		if (paymentClaiming || paymentClaimed) return;
+		paymentClaiming = true;
+		try {
+			await fetch(`${API}/portal/${token}/payment-claimed`, { method: 'POST' });
+			paymentClaimed = true;
+			if (info) info = { ...info, customer_payment_claimed: true };
+		} catch {
+			// silent
+		} finally {
+			paymentClaiming = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -195,7 +229,7 @@
 				<div class="crown-float-wrap">
 					<img src="/crown-icon.png" alt="" class="crown-float" />
 				</div>
-				<h1 class="event-name">{info.bride_groom || 'Davetiniz'}</h1>
+				<h1 class="event-name">{info.portal_title || 'Davetiniz'}</h1>
 				<div class="event-divider"><span></span><img src="/ikon.png" alt="" class="divider-icon" /><span></span></div>
 				<div class="event-meta">
 					<div class="meta-item">
@@ -216,6 +250,14 @@
 					{/if}
 				</div>
 			</div>
+
+			<!-- Message from business -->
+			{#if info.portal_message}
+				<div class="message-card animate-in" style="animation-delay:0.1s">
+					<span class="message-icon">✉️</span>
+					<p>{info.portal_message}</p>
+				</div>
+			{/if}
 
 			<!-- Form -->
 			{#if info.form_fields.length > 0}
@@ -283,7 +325,81 @@
 				</div>
 			{/if}
 
-			<!-- Seating section -->
+			<!-- Payment section -->
+			{#if info.payment_enabled}
+				<div class="payment-card animate-in" style="animation-delay:0.2s">
+					{#if info.payment_complete}
+						<div class="payment-confirmed">
+							<div class="confirmed-icon">✓</div>
+							<div>
+								<strong>Ödemeniz Onaylanmıştır</strong>
+								<p>İşletme ödemenizi sisteme işledi. Teşekkürler!</p>
+							</div>
+						</div>
+					{:else}
+						<div class="payment-header">
+							<span class="payment-icon">🏦</span>
+							<div>
+								<h2 class="payment-title">Ödeme Bilgileri</h2>
+								<p class="payment-subtitle">Havale / EFT ile ödeme yapabilirsiniz.</p>
+							</div>
+						</div>
+
+						{#if info.appointment_no}
+							<div class="payment-appt-no">
+								Randevu ID: <strong>#{info.appointment_no}</strong>
+							</div>
+						{/if}
+
+						<div class="payment-details">
+							{#if info.payment_bank_name}
+								<div class="payment-row">
+									<span>Banka</span>
+									<strong>{info.payment_bank_name}</strong>
+								</div>
+							{/if}
+							{#if info.payment_account_holder}
+								<div class="payment-row">
+									<span>Hesap Sahibi</span>
+									<strong>{info.payment_account_holder}</strong>
+								</div>
+							{/if}
+							{#if info.payment_iban}
+								<div class="payment-row iban-row">
+									<span>IBAN</span>
+									<strong class="iban">{info.payment_iban}</strong>
+								</div>
+							{/if}
+							{#if info.payment_description}
+								<div class="payment-row">
+									<span>Açıklama</span>
+									<strong>{buildPaymentDescription(info)}</strong>
+								</div>
+							{/if}
+						</div>
+
+						<div class="payment-claim-section">
+							{#if info.customer_payment_claimed || paymentClaimed}
+								<div class="claim-sent">
+									<span class="claim-check">✓</span>
+									Ödeme bildiriminiz iletildi. İşletme onayını bekliyorsunuz.
+								</div>
+							{:else}
+								<p class="claim-hint">Ödemeyi yaptıysanız aşağıdan bildirin, işletme bilgilendirilsin.</p>
+								<button class="claim-btn" onclick={claimPayment} disabled={paymentClaiming}>
+									{#if paymentClaiming}
+										<span class="btn-spinner"></span> Gönderiliyor…
+									{:else}
+										<span class="claim-btn-icon">✓</span> Ödemeyi Yaptım
+									{/if}
+								</button>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			{/if}
+
+		<!-- Seating section -->
 			{#if info.portal_layout_permission && info.reserved_layouts.length > 0}
 				<div class="seating-card animate-in" style="animation-delay:0.25s">
 					<div class="seating-card-icon">🪑</div>
@@ -899,6 +1015,174 @@
 		text-align: center;
 		color: rgba(255,255,255,0.4);
 		font-size: 0.9rem;
+	}
+
+	/* ── Payment card ── */
+	.payment-card {
+		width: 100%;
+		background: rgba(255,255,255,0.03);
+		border: 1px solid rgba(255,255,255,0.1);
+		border-radius: 20px;
+		overflow: hidden;
+		backdrop-filter: blur(8px);
+		padding: 1.75rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1.25rem;
+	}
+
+	.payment-confirmed {
+		display: flex;
+		align-items: center;
+		gap: 1.25rem;
+	}
+
+	.confirmed-icon {
+		width: 52px;
+		height: 52px;
+		border-radius: 50%;
+		background: rgba(22,163,74,0.15);
+		border: 2px solid rgba(22,163,74,0.4);
+		color: #16a34a;
+		font-size: 1.4rem;
+		font-weight: 900;
+		display: grid;
+		place-items: center;
+		flex-shrink: 0;
+	}
+
+	.payment-confirmed strong { font-size: 1.1rem; color: #4ade80; display: block; margin-bottom: 0.25rem; }
+	.payment-confirmed p { margin: 0; color: rgba(255,255,255,0.6); font-size: 0.88rem; }
+
+	.payment-header {
+		display: flex;
+		align-items: flex-start;
+		gap: 1rem;
+	}
+
+	.payment-icon { font-size: 2rem; flex-shrink: 0; }
+	.payment-title { font-size: 1.15rem; font-weight: 900; margin: 0 0 0.25rem; color: #f1f5f9; }
+	.payment-subtitle { color: rgba(255,255,255,0.45); font-size: 0.86rem; margin: 0; }
+
+	.payment-appt-no {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 1rem;
+		background: rgba(197,155,49,0.1);
+		border: 1px solid rgba(197,155,49,0.3);
+		border-radius: 10px;
+		font-size: 0.88rem;
+		color: rgba(255,255,255,0.7);
+	}
+
+	.payment-appt-no strong { color: #f0c040; font-size: 1rem; }
+
+	.payment-details {
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		padding: 1rem;
+		background: rgba(255,255,255,0.04);
+		border: 1px solid rgba(255,255,255,0.08);
+		border-radius: 12px;
+	}
+
+	.payment-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		font-size: 0.9rem;
+	}
+
+	.payment-row span { color: rgba(255,255,255,0.45); flex-shrink: 0; }
+	.payment-row strong { color: #f1f5f9; text-align: right; }
+
+	.iban-row { flex-wrap: wrap; }
+	.iban {
+		font-family: 'Courier New', monospace;
+		font-size: 0.85rem;
+		letter-spacing: 0.05em;
+		color: #f0c040;
+		word-break: break-all;
+	}
+
+	.payment-claim-section { padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.07); }
+	.claim-hint { color: rgba(255,255,255,0.45); font-size: 0.84rem; margin: 0 0 0.85rem; }
+
+	.claim-btn {
+		width: 100%;
+		padding: 0.75rem 1.5rem;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.65rem;
+		background: linear-gradient(135deg, rgba(22,163,74,0.2), rgba(22,163,74,0.08));
+		border: 1px solid rgba(22,163,74,0.4);
+		color: #4ade80;
+		border-radius: 999px;
+		font-size: 0.95rem;
+		font-weight: 900;
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.claim-btn-icon {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		background: rgba(22,163,74,0.25);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 0.85rem;
+		flex-shrink: 0;
+	}
+
+	.message-card {
+		display: flex;
+		gap: 0.75rem;
+		align-items: flex-start;
+		padding: 1rem 1.25rem;
+		background: rgba(255,255,255,0.04);
+		border: 1px solid rgba(255,255,255,0.1);
+		border-radius: 14px;
+	}
+	.message-icon { font-size: 1.3rem; flex-shrink: 0; }
+	.message-card p { margin: 0; color: rgba(255,255,255,0.82); font-size: 0.92rem; line-height: 1.5; white-space: pre-wrap; }
+
+	.claim-btn:hover:not(:disabled) {
+		background: rgba(22,163,74,0.25);
+		border-color: rgba(22,163,74,0.65);
+		transform: translateY(-1px);
+	}
+
+	.claim-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+	.claim-sent {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.85rem 1rem;
+		background: rgba(22,163,74,0.1);
+		border: 1px solid rgba(22,163,74,0.3);
+		border-radius: 10px;
+		font-size: 0.88rem;
+		color: rgba(255,255,255,0.7);
+		font-weight: 700;
+	}
+
+	.claim-check {
+		width: 28px;
+		height: 28px;
+		border-radius: 50%;
+		background: rgba(22,163,74,0.2);
+		color: #4ade80;
+		display: grid;
+		place-items: center;
+		font-weight: 900;
+		flex-shrink: 0;
 	}
 
 	/* ── Footer ── */

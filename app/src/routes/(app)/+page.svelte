@@ -1,25 +1,80 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, type EventApi, type EventTypeApi, type SalonApi } from '$lib/api';
+	import { api, type EventApi, type EventTypeApi, type SalonApi, type NotificationApi } from '$lib/api';
 
 	let events = $state<EventApi[]>([]);
 	let eventTypes = $state<EventTypeApi[]>([]);
 	let salon = $state<SalonApi | null>(null);
+	let notifications = $state<NotificationApi[]>([]);
+
+	let homeTab = $state<'genel' | 'mail'>('genel');
 
 	const today = new Date();
 
 	onMount(async () => {
 		try {
-			const [evs, types, s] = await Promise.all([
+			const [evs, types, s, notifs] = await Promise.all([
 				api.get<EventApi[]>('/events'),
 				api.get<EventTypeApi[]>('/events/types'),
-				api.get<SalonApi>('/settings/salon')
+				api.get<SalonApi>('/settings/salon'),
+				api.get<NotificationApi[]>('/notifications?limit=20')
 			]);
 			events = evs;
 			eventTypes = types;
 			salon = s;
+			notifications = notifs;
 		} catch {}
 	});
+
+	const NOTIF_LABELS: Record<string, { icon: string; color: string }> = {
+		payment_claimed: { icon: '💸', color: '#f59e0b' },
+		payment_confirmed: { icon: '✓', color: '#16a34a' },
+		email_sent: { icon: '✉️', color: '#2563eb' },
+		email_failed: { icon: '⚠', color: '#dc2626' }
+	};
+
+	function formatRelative(dateStr: string) {
+		const d = new Date(dateStr);
+		const diffMin = Math.round((Date.now() - d.getTime()) / 60000);
+		if (diffMin < 1) return 'şimdi';
+		if (diffMin < 60) return `${diffMin} dk önce`;
+		const diffH = Math.round(diffMin / 60);
+		if (diffH < 24) return `${diffH} saat önce`;
+		return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+	}
+
+	async function markNotificationRead(id: string) {
+		notifications = notifications.map(n => n.id === id ? { ...n, is_read: true } : n);
+		try { await api.post(`/notifications/${id}/read`, {}); } catch {}
+	}
+
+	// Müşteriye mail gönder
+	let mailAppointmentNo = $state('');
+	let mailSubject = $state('');
+	let mailBody = $state('');
+	let mailSending = $state(false);
+	let mailResult = $state<{ ok: boolean; detail: string } | null>(null);
+
+	async function sendCustomerMail() {
+		if (!mailAppointmentNo || !mailSubject || !mailBody) return;
+		mailSending = true;
+		mailResult = null;
+		try {
+			const res = await api.post<{ ok: boolean; detail: string }>('/events/send-mail', {
+				appointment_no: Number(mailAppointmentNo),
+				subject: mailSubject,
+				body: mailBody
+			});
+			mailResult = res;
+			if (res.ok) {
+				mailAppointmentNo = ''; mailSubject = ''; mailBody = '';
+			}
+		} catch (e) {
+			mailResult = { ok: false, detail: e instanceof Error ? e.message : 'Gönderilemedi' };
+		} finally {
+			mailSending = false;
+		}
+	}
 
 	const typeName = (typeId: string | null) => eventTypes.find(t => t.id === typeId)?.name ?? '—';
 	const formatMoney = (value: number) => `₺${value.toLocaleString('tr-TR')}`;
@@ -57,13 +112,18 @@
 <section class="home-shell">
 	<div class="page-heading">
 		<div>
-			<p class="eyebrow">Ana Sayfa</p>
 			<h1>{salon?.name ?? 'Eventra'}</h1>
 			<p>Gelir, tahsilat ve yaklaşan davetleri tek ekranda gör.</p>
 		</div>
 		<a class="dashboard-link" href="/dashboard">Dashboard</a>
 	</div>
 
+	<div class="home-tab-bar">
+		<button class="home-tab-btn" class:active={homeTab === 'genel'} type="button" onclick={() => (homeTab = 'genel')}>Genel</button>
+		<button class="home-tab-btn" class:active={homeTab === 'mail'} type="button" onclick={() => (homeTab = 'mail')}>Mail Gönder</button>
+	</div>
+
+	{#if homeTab === 'genel'}
 	<div class="summary-grid">
 		<div class="metric-card strong">
 			<span>{today.toLocaleDateString('tr-TR', { month: 'long' })} ciro</span>
@@ -87,7 +147,7 @@
 		</div>
 	</div>
 
-	<div class="content-grid">
+	<div class="content-grid three">
 		<section class="panel">
 			<div class="panel-head">
 				<div>
@@ -145,13 +205,78 @@
 				</div>
 			</div>
 		</section>
+
+		<section class="panel">
+			<div class="panel-head">
+				<div>
+					<h2>Bildirimler</h2>
+					<p>Ödeme ve mail bildirimleri.</p>
+				</div>
+			</div>
+
+			<div class="notif-list">
+				{#each notifications as n}
+					{@const meta = NOTIF_LABELS[n.type] ?? { icon: '🔔', color: '#64748b' }}
+					<div
+						class="notif-row"
+						class:unread={!n.is_read}
+						style="--ncolor:{meta.color}"
+						role="button"
+						tabindex="0"
+						onclick={() => markNotificationRead(n.id)}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								markNotificationRead(n.id);
+							}
+						}}
+					>
+						<span class="notif-icon">{meta.icon}</span>
+						<div class="notif-main">
+							<strong>{n.title}</strong>
+							<span>{n.message}</span>
+						</div>
+						<small>{formatRelative(n.created_at)}</small>
+					</div>
+				{:else}
+					<p class="empty">Henüz bildirim yok.</p>
+				{/each}
+			</div>
+		</section>
 	</div>
+	{:else}
+	<div class="content-grid single">
+		<section class="panel">
+			<div class="panel-head">
+				<div>
+					<h2>Müşteriye Mail Gönder</h2>
+					<p>Randevu numarasıyla müşteriye mail at, kayıt mailini sen de al.</p>
+				</div>
+			</div>
+
+			<form class="mail-form" onsubmit={(e) => { e.preventDefault(); sendCustomerMail(); }}>
+				<label><span>Randevu No</span><input type="number" placeholder="#12" bind:value={mailAppointmentNo} required /></label>
+				<label><span>Konu</span><input placeholder="Davetinizle ilgili bilgi" bind:value={mailSubject} required /></label>
+				<label class="full"><span>Mesaj</span><textarea rows="5" placeholder="Mesajınızı yazın…" bind:value={mailBody} required></textarea></label>
+				<div class="form-actions">
+					<button class="save-btn" type="submit" disabled={mailSending}>
+						{mailSending ? 'Gönderiliyor…' : 'Mail Gönder'}
+					</button>
+					{#if mailResult}
+						<span class="mail-result" class:ok={mailResult.ok} class:fail={!mailResult.ok}>
+							{mailResult.ok ? '✓ Mail gönderildi' : `✗ Hata: ${mailResult.detail}`}
+						</span>
+					{/if}
+				</div>
+			</form>
+		</section>
+	</div>
+	{/if}
 </section>
 
 <style>
 	.home-shell { max-width: 1480px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.25rem; }
 	.page-heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
-	.eyebrow { margin: 0 0 0.25rem; color: var(--accent); font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.78rem; }
 	h1, h2, p { margin: 0; }
 	h1 { font-size: clamp(1.8rem, 3.4vw, 3rem); }
 	.page-heading p, .panel-head p, .metric-card small, .event-main span, .cash-bars span { color: var(--muted); }
@@ -163,6 +288,29 @@
 	.metric-card strong { font-size: clamp(1.45rem, 2.6vw, 2.15rem); }
 	.metric-card.strong { background: linear-gradient(135deg, var(--accent-soft), var(--surface)); }
 	.content-grid { display: grid; grid-template-columns: 1.35fr 0.8fr; gap: 1rem; }
+	.content-grid.three { grid-template-columns: 1.1fr 0.7fr 0.9fr; }
+	.content-grid.single { grid-template-columns: 1fr; }
+	.home-tab-bar { display: flex; gap: 0.5rem; }
+	.home-tab-btn { padding: 0.6rem 1.1rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-weight: 800; font-size: 0.86rem; cursor: pointer; }
+	.home-tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+	.notif-list { display: flex; flex-direction: column; gap: 0.6rem; max-height: 420px; overflow-y: auto; }
+	.notif-row { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 0.6rem; padding: 0.7rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); cursor: pointer; }
+	.notif-row.unread { border-color: color-mix(in srgb, var(--ncolor) 50%, var(--line)); background: color-mix(in srgb, var(--ncolor) 6%, var(--surface-strong)); }
+	.notif-icon { font-size: 1.1rem; }
+	.notif-main { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+	.notif-main strong { font-size: 0.84rem; }
+	.notif-main span { color: var(--muted); font-size: 0.78rem; }
+	.notif-row small { color: var(--muted); white-space: nowrap; font-size: 0.72rem; }
+	.mail-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
+	.mail-form label { display: flex; flex-direction: column; gap: 0.35rem; font-weight: 800; font-size: 0.82rem; }
+	.mail-form label.full { grid-column: 1 / -1; }
+	.mail-form input, .mail-form textarea { padding: 0.65rem 0.75rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+	.mail-form .form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.85rem; }
+	.save-btn { padding: 0.7rem 1.2rem; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 900; cursor: pointer; }
+	.save-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+	.mail-result { font-weight: 800; font-size: 0.85rem; }
+	.mail-result.ok { color: #16a34a; }
+	.mail-result.fail { color: #dc2626; }
 	.panel { padding: 1rem; }
 	.panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 	.panel h2 { font-size: 1.15rem; margin-bottom: 0.2rem; }
@@ -181,11 +329,12 @@
 	.bar.red i { background: #dc2626; }
 	.empty { color: var(--muted); font-size: 0.88rem; font-style: italic; text-align: center; padding: 1rem; }
 	.empty a { color: var(--accent); }
-	@media (max-width: 1000px) { .summary-grid, .content-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+	@media (max-width: 1000px) { .summary-grid, .content-grid, .content-grid.three { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 	@media (max-width: 700px) {
 		.page-heading, .panel-head { flex-direction: column; align-items: stretch; }
-		.summary-grid, .content-grid { grid-template-columns: 1fr; }
+		.summary-grid, .content-grid, .content-grid.three { grid-template-columns: 1fr; }
 		.event-row { grid-template-columns: 56px 1fr; }
 		.payment-pill { grid-column: 2; width: fit-content; }
+		.mail-form { grid-template-columns: 1fr; }
 	}
 </style>

@@ -52,6 +52,17 @@ class SalonOut(BaseModel):
     reminder_days: int
     max_users: int
     created_at: datetime
+    payment_bank_name: str = ""
+    payment_iban: str = ""
+    payment_account_holder: str = ""
+    payment_description: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+    notification_email: str = ""
 
     model_config = {"from_attributes": True}
 
@@ -94,6 +105,17 @@ class SalonUpdateIn(BaseModel):
     vat_rate: float | None = None
     contract_prefix: str | None = None
     reminder_days: int | None = None
+    payment_bank_name: str | None = None
+    payment_iban: str | None = None
+    payment_account_holder: str | None = None
+    payment_description: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    smtp_use_tls: bool | None = None
+    notification_email: str | None = None
 
 
 class CustomerFieldDefIn(BaseModel):
@@ -241,6 +263,8 @@ class EventIn(BaseModel):
     kapora_paid: bool = False
     total_paid: float = 0
     payment_complete: bool = False
+    payment_enabled: bool = False
+    email: str = ""
     note: str = ""
     reminder_enabled: bool = False
     reminder_date: str = ""
@@ -250,6 +274,8 @@ class EventIn(BaseModel):
     seating_enabled: bool = False
     # Portal
     portal_enabled: bool = False
+    portal_title: str = "Davetiniz"
+    portal_message: str = ""
     portal_org_type_id: str | None = None
     portal_form_type_id: str | None = None
     portal_layout_permission: bool = False
@@ -289,6 +315,7 @@ class EventTypeOut(BaseModel):
 
 class EventOut(BaseModel):
     id: str
+    appointment_no: int | None = None
     title: str
     event_date: str
     contract_date: str
@@ -310,6 +337,9 @@ class EventOut(BaseModel):
     kapora_paid: bool
     total_paid: float
     payment_complete: bool
+    payment_enabled: bool = False
+    customer_payment_claimed: bool = False
+    email: str = ""
     note: str
     reminder_enabled: bool
     reminder_date: str
@@ -319,6 +349,8 @@ class EventOut(BaseModel):
     seating_enabled: bool
     portal_token: str | None
     portal_enabled: bool
+    portal_title: str = "Davetiniz"
+    portal_message: str = ""
     portal_org_type_id: str | None
     portal_form_type_id: str | None
     portal_layout_permission: bool
@@ -431,10 +463,21 @@ class PortalEventInfo(BaseModel):
     bride_groom: str
     guest_count: int
     event_type_name: str
+    portal_title: str = "Davetiniz"
     seating_enabled: bool
     portal_layout_permission: bool
     reserved_layouts: list[PortalLayoutInfo]
     form_fields: list[PortalFormFieldOut]
+    # Payment
+    appointment_no: int | None = None
+    payment_enabled: bool = False
+    payment_bank_name: str = ""
+    payment_iban: str = ""
+    payment_account_holder: str = ""
+    payment_description: str = ""
+    payment_complete: bool = False
+    customer_payment_claimed: bool = False
+    portal_message: str = ""
 
 
 class PortalSeatSubmit(BaseModel):
@@ -475,6 +518,47 @@ class EventFormFieldDefOut(BaseModel):
     is_required: bool
     sort_order: int
     is_builtin: bool
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Event-type-specific form fields (internal "Etkinlik Form Alanı") ───────
+
+class EventTypeFieldDefIn(BaseModel):
+    event_type_id: str
+    key: str
+    label: str
+    field_type: str = "text"
+    options: list[str] = []
+    is_required: bool = False
+    sort_order: int = 0
+
+
+class EventTypeFieldDefOut(BaseModel):
+    id: str
+    event_type_id: str
+    key: str
+    label: str
+    field_type: str
+    options: list[str]
+    is_required: bool
+    sort_order: int
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Payment installments (ara ödeme) ────────────────────────────────────────
+
+class PaymentInstallmentIn(BaseModel):
+    amount: float
+
+
+class PaymentInstallmentOut(BaseModel):
+    id: str
+    event_id: str
+    amount: float
+    added_by_name: str
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -585,3 +669,35 @@ class PortalFormSubmissionOut(BaseModel):
     data: dict
 
     model_config = {"from_attributes": True}
+
+
+# ─── Notifications ────────────────────────────────────────────────────────────
+
+class NotificationOut(BaseModel):
+    id: str
+    event_id: str | None
+    type: str
+    title: str
+    message: str
+    is_read: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Mail ──────────────────────────────────────────────────────────────────────
+
+class SmtpTestIn(BaseModel):
+    to_email: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from_email: str | None = None
+    smtp_use_tls: bool | None = None
+
+
+class SendCustomerMailIn(BaseModel):
+    appointment_no: int
+    subject: str
+    body: str

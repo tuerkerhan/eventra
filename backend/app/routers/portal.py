@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
-from ..models import CustomerFormTypeField, Event, GuestSeating, OrgTypeField, PortalFormSubmission, Salon, VenueLayout
+from ..email_utils import send_email
+from ..models import CustomerFormTypeField, Event, GuestSeating, OrgTypeField, PortalFormSubmission, Salon, VenueLayout, VenueTable
+from ..notify import notify
 from ..schemas import (
     GuestSeatOut,
     OrgTypeFieldOut,
@@ -93,10 +95,20 @@ def get_portal_info(token: str, db: Session = Depends(get_db)):
         bride_groom=event.bride_groom,
         guest_count=event.guest_count,
         event_type_name=event_type_name,
+        portal_title=event.portal_title or "Davetiniz",
         seating_enabled=event.seating_enabled,
         portal_layout_permission=event.portal_layout_permission,
         reserved_layouts=reserved_layouts,
         form_fields=form_fields,
+        appointment_no=event.appointment_no,
+        payment_enabled=bool(event.payment_enabled),
+        payment_bank_name=salon.payment_bank_name if salon else "",
+        payment_iban=salon.payment_iban if salon else "",
+        payment_account_holder=salon.payment_account_holder if salon else "",
+        payment_description=salon.payment_description if salon else "",
+        payment_complete=event.payment_complete,
+        customer_payment_claimed=bool(event.customer_payment_claimed),
+        portal_message=event.portal_message or "",
     )
 
 
@@ -106,6 +118,29 @@ def submit_form(token: str, body: PortalFormSubmit, db: Session = Depends(get_db
     submission = PortalFormSubmission(event_id=event.id, data=body.data)
     db.add(submission)
     db.commit()
+    return {"ok": True}
+
+
+@router.post("/{token}/payment-claimed")
+def claim_payment(token: str, db: Session = Depends(get_db)):
+    event = _get_event_by_token(token, db)
+    if event.payment_complete:
+        return {"ok": True, "already_confirmed": True}
+    event.customer_payment_claimed = True
+    db.commit()
+
+    salon = db.query(Salon).filter(Salon.id == event.salon_id).first()
+    name = event.full_name or event.bride_groom or event.title or "Müşteri"
+    appt = f"#{event.appointment_no}" if event.appointment_no else ""
+    title = "Ödeme bildirimi"
+    message = f"{name} isimli müşteri, randevu {appt} için ödeme yaptığını bildirdi. Sistemi kontrol edip onaylayınız."
+    notify(db, event.salon_id, "payment_claimed", title, message, event_id=event.id)
+
+    if salon and salon.notification_email:
+        ok, detail = send_email(salon, salon.notification_email, f"Eventra: {title}", message)
+        if not ok:
+            notify(db, event.salon_id, "email_failed", "Mail gönderilemedi", f"Ödeme bildirimi maili gönderilemedi: {detail}", event_id=event.id)
+
     return {"ok": True}
 
 
@@ -121,7 +156,7 @@ def get_portal_layout(token: str, layout_id: str, db: Session = Depends(get_db))
     layout = (
         db.query(VenueLayout)
         .options(joinedload(VenueLayout.tables))
-        .filter(VenueLayout.id == layout_id)
+        .filter(VenueLayout.id == layout_id, VenueLayout.salon_id == event.salon_id)
         .first()
     )
     return layout
@@ -136,7 +171,6 @@ def get_portal_seatings(token: str, layout_id: str, db: Session = Depends(get_db
     if layout_id not in allowed:
         raise HTTPException(status_code=403, detail="Bu salon bu davet için rezerve edilmemiş")
     # Return seatings for tables in this layout
-    from ..models import VenueTable
     table_ids = [t.id for t in db.query(VenueTable).filter(VenueTable.layout_id == layout_id).all()]
     return db.query(GuestSeating).filter(
         GuestSeating.event_id == event.id,
@@ -153,7 +187,6 @@ def save_portal_seatings(token: str, layout_id: str, body: PortalSeatSubmit, db:
     if layout_id not in allowed:
         raise HTTPException(status_code=403, detail="Bu salon bu davet için rezerve edilmemiş")
 
-    from ..models import VenueTable
     table_ids = {t.id for t in db.query(VenueTable).filter(VenueTable.layout_id == layout_id).all()}
 
     # Delete only seatings for this layout's tables
@@ -184,7 +217,7 @@ def get_portal_layout_legacy(token: str, db: Session = Depends(get_db)):
     layout = (
         db.query(VenueLayout)
         .options(joinedload(VenueLayout.tables))
-        .filter(VenueLayout.id == event.layout_id)
+        .filter(VenueLayout.id == event.layout_id, VenueLayout.salon_id == event.salon_id)
         .first()
     )
     return layout
@@ -193,15 +226,31 @@ def get_portal_layout_legacy(token: str, db: Session = Depends(get_db)):
 @router.get("/{token}/seatings", response_model=list[GuestSeatOut])
 def get_portal_seatings_legacy(token: str, db: Session = Depends(get_db)):
     event = _get_event_by_token(token, db)
-    return db.query(GuestSeating).filter(GuestSeating.event_id == event.id).all()
+    if not event.layout_id:
+        return []
+    table_ids = [t.id for t in db.query(VenueTable).filter(VenueTable.layout_id == event.layout_id).all()]
+    return db.query(GuestSeating).filter(
+        GuestSeating.event_id == event.id,
+        GuestSeating.table_id.in_(table_ids),
+    ).all()
 
 
 @router.put("/{token}/seatings", response_model=list[GuestSeatOut])
 def save_portal_seatings_legacy(token: str, body: PortalSeatSubmit, db: Session = Depends(get_db)):
     event = _get_event_by_token(token, db)
-    db.query(GuestSeating).filter(GuestSeating.event_id == event.id).delete()
+    if not event.layout_id:
+        return []
+    table_ids = {t.id for t in db.query(VenueTable).filter(VenueTable.layout_id == event.layout_id).all()}
+    db.query(GuestSeating).filter(
+        GuestSeating.event_id == event.id,
+        GuestSeating.table_id.in_(table_ids),
+    ).delete(synchronize_session=False)
     db.flush()
-    rows = [GuestSeating(event_id=event.id, **s.model_dump()) for s in body.seatings]
+    rows = [
+        GuestSeating(event_id=event.id, **s.model_dump())
+        for s in body.seatings
+        if s.table_id in table_ids
+    ]
     db.add_all(rows)
     db.commit()
     return rows

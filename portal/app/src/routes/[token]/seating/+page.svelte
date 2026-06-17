@@ -40,7 +40,14 @@
 	let saved = $state(false);
 	let editingSeat = $state<{ tableId: string; seatNo: number } | null>(null);
 	let guestInput = $state('');
+	let guestInputEl: HTMLInputElement | undefined = $state();
 	let printMode = $state(false);
+
+	$effect(() => {
+		if (editingSeat) {
+			setTimeout(() => guestInputEl?.focus(), 0);
+		}
+	});
 
 	const SEAT_GAP = 22;
 
@@ -204,6 +211,12 @@
 						{@const isAssigned = Boolean(guest)}
 						<g
 							onclick={() => openEdit(t.id, sp.seat)}
+							onkeydown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									openEdit(t.id, sp.seat);
+								}
+							}}
 							style="cursor: pointer"
 							role="button"
 							aria-label="Koltuk {sp.seat}: {guest || 'boş'}"
@@ -223,15 +236,19 @@
 
 		<!-- Seat edit modal -->
 		{#if editingSeat}
-			<div class="modal-backdrop" onclick={() => (editingSeat = null)} role="dialog" aria-modal="true" aria-label="Koltuk düzenle">
-				<div class="modal" onclick={(e) => e.stopPropagation()} role="document">
+			<div class="modal-backdrop" onclick={(e) => {
+				if (e.target === e.currentTarget) editingSeat = null;
+			}} onkeydown={(e) => {
+				if (e.key === 'Escape') editingSeat = null;
+			}} role="dialog" aria-modal="true" aria-label="Koltuk düzenle" tabindex="-1">
+				<div class="modal" role="document">
 					<h3>Koltuk {editingSeat.seatNo} – Misafir</h3>
 					<input
+						bind:this={guestInputEl}
 						type="text"
 						placeholder="Misafir adı soyadı"
 						bind:value={guestInput}
 						onkeydown={(e) => e.key === 'Enter' && saveGuest()}
-						autofocus
 					/>
 					<div class="modal-actions">
 						<button type="button" class="modal-save" onclick={saveGuest}>Kaydet</button>

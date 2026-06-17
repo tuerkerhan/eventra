@@ -42,6 +42,13 @@
 	// Tutarı gir modalı
 	let amountTarget = $state<ExpenseApi | null>(null);
 	let finalAmount = $state(0);
+	let finalAmountInput: HTMLInputElement | undefined = $state();
+
+	$effect(() => {
+		if (amountTarget) {
+			setTimeout(() => finalAmountInput?.focus(), 0);
+		}
+	});
 
 	// Ödemeler listesi filtresi
 	let listFilter = $state<'all' | 'unpaid' | 'paid' | 'needsAmount'>('all');
@@ -328,7 +335,6 @@
 	<!-- ─── HEADER ────────────────────────────────────────────────────────── -->
 	<div class="db-header">
 		<div>
-			<p class="eyebrow">Dashboard</p>
 			<h1>Yönetim Paneli</h1>
 			<p class="subtitle">Gelir, gider ve ödeme takibi.</p>
 		</div>
@@ -747,8 +753,10 @@
 
 <!-- ─── TUTARI GİR MODALI ─────────────────────────────────────────────────── -->
 {#if amountTarget}
-	<div class="modal-back" role="dialog" aria-modal="true">
-		<div class="modal" onclick={(e) => e.stopPropagation()} role="document">
+	<div class="modal-back" role="dialog" aria-modal="true" tabindex="-1" onkeydown={(e) => {
+		if (e.key === 'Escape') amountTarget = null;
+	}}>
+		<div class="modal" role="document">
 			<div class="modal-head">
 				<h2>Nihai Tutarı Gir</h2>
 				<button class="close-btn" type="button" onclick={() => (amountTarget = null)}>✕</button>
@@ -759,7 +767,7 @@
 			</p>
 			<div class="amount-wrap">
 				<span class="curr-prefix">{amountTarget.currency === 'TRY' ? '₺' : amountTarget.currency === 'USD' ? '$' : '€'}</span>
-				<input type="number" min="0.01" step="0.01" bind:value={finalAmount} placeholder="0.00" class="amount-inp" autofocus />
+				<input bind:this={finalAmountInput} type="number" min="0.01" step="0.01" bind:value={finalAmount} placeholder="0.00" class="amount-inp" />
 			</div>
 			{#if amountTarget.amount > 0}
 				<p class="muted hint">Tahmini tutar: {fmtAmt(amountTarget)}</p>
@@ -859,7 +867,6 @@
 
 	/* Header */
 	.db-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-	.eyebrow { margin: 0 0 0.2rem; color: var(--accent); font-size: 0.78rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
 	h1 { margin: 0; font-size: clamp(1.8rem, 3vw, 2.8rem); }
 	h2 { margin: 0; font-size: 1.1rem; }
 	p, h1, h2 { margin: 0; }
@@ -1011,7 +1018,7 @@
 	.conv-rates { display: flex; gap: 0.5rem; font-size: 0.76rem; color: var(--muted); flex-wrap: wrap; }
 
 	/* Inputs */
-	input[type="number"], input[type="text"], input[type="date"], select, textarea {
+	input[type="number"], input[type="date"], select, textarea {
 		width: 100%; min-height: 38px; border: 1px solid var(--line); border-radius: 7px;
 		padding: 0.45rem 0.7rem; background: var(--surface-strong); color: var(--text); font: inherit; font-size: 0.9rem;
 	}

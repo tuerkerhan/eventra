@@ -41,15 +41,19 @@ def _fmt_money(v: float) -> str:
 
 def _build_replacements(event: Event, salon: Salon, custom_field_defs: list | None = None) -> dict[str, str]:
     event_type_name = event.event_type.name if event.event_type else ""
-    contract_no = f"{salon.contract_prefix}-{event.id[:8].upper()}"
+    randevu_no = f"{salon.contract_prefix}-{event.appointment_no}" if event.appointment_no else ""
     remaining = event.total_fee - event.total_paid
+    gelin_damat = event.bride_groom or next(
+        (cf.value for cf in (event.custom_fields or []) if cf.key == "gelin_damat"), ""
+    )
 
     replacements = {
         "%baslik%": event.title or "",
         "%isim%": event.full_name or "",
-        "%gelin_damat%": event.bride_groom or "",
+        "%gelin_damat%": gelin_damat or "",
         "%tc_no%": event.tc_no or "",
         "%telefon%": event.mobile_phone or event.phone or "",
+        "%email%": event.email or "",
         "%tarih%": _fmt_date(event.event_date),
         "%sozlesme_tarihi%": _fmt_date(event.contract_date) if event.contract_date else "",
         "%baslama_saati%": event.start_time or "",
@@ -66,7 +70,7 @@ def _build_replacements(event: Event, salon: Salon, custom_field_defs: list | No
         "%kapora%": _fmt_money(event.kapora_amount),
         "%odenen%": _fmt_money(event.total_paid),
         "%kalan%": _fmt_money(remaining),
-        "%sozlesme_no%": contract_no,
+        "%randevu_no%": randevu_no,
         "%personel%": event.staff or "",
         "%notlar%": event.note or "—",
         "%not%": event.note or "—",
@@ -281,8 +285,9 @@ def generate_contract(
         output = _fill_odt(tmpl.file_path, replacements)
         media_type = "application/vnd.oasis.opendocument.text"
 
-    safe_title = re.sub(r"[^\w\s-]", "", event.title or "sozlesme").strip().replace(" ", "_")
-    filename = f"sozlesme_{safe_title}_{event.event_date}.{tmpl.file_type}"
+    safe_title = re.sub(r"[^\w\s-]", "", event.title or event.full_name or "sozlesme").strip().replace(" ", "_")
+    appointment_part = f"{salon.contract_prefix}-{event.appointment_no}" if event.appointment_no else event.id[:8]
+    filename = f"sozlesme_{appointment_part}_{safe_title}_{event.event_date}.{tmpl.file_type}"
 
     return Response(
         content=output,

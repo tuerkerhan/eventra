@@ -171,7 +171,7 @@
 		(e.currentTarget as SVGElement).setPointerCapture(e.pointerId);
 	};
 
-	const clickTable = (e: MouseEvent, id: string) => {
+	const clickTable = (e: Event, id: string) => {
 		if (activeTool !== 'select') return;
 		e.stopPropagation();
 		selectedId = id;
@@ -307,7 +307,6 @@
 
 	<div class="page-heading">
 		<div>
-			<p class="eyebrow">Salon Düzeni</p>
 			<h1>Masa & Salon Tasarımı</h1>
 		</div>
 		<div class="head-actions">
@@ -428,7 +427,6 @@
 		</aside>
 
 		<div class="canvas-wrap">
-			<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 			<svg
 				bind:this={svgEl}
 				class="salon-svg"
@@ -440,7 +438,11 @@
 				onpointermove={onSvgPointerMove}
 				onpointerup={onSvgPointerUp}
 				onclick={onSvgClick}
-				role="img"
+				onkeydown={(e) => {
+					if (e.key === 'Enter' || e.key === ' ') e.preventDefault();
+				}}
+				role="button"
+				tabindex="0"
 				aria-label="Salon tasarım alanı"
 				style="touch-action:none"
 			>
@@ -463,8 +465,7 @@
 				{/if}
 
 				<!-- Stage -->
-				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-				<g onpointerdown={startStageDrag} style="cursor:move">
+				<g onpointerdown={startStageDrag} role="presentation" style="cursor:move">
 					<rect x={stage.x} y={stage.y} width={stage.width} height={stage.height}
 						rx="6"
 						fill={stageSelected ? '#1e4a7f' : '#1e3a5f'}
@@ -477,21 +478,27 @@
 						text-anchor="middle" fill="rgba(147,197,253,0.4)" font-size="9" pointer-events="none">sürükle taşı</text>
 				</g>
 				<!-- Stage resize handles (always visible) -->
-				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<rect class="rh rh-ew" x={stage.x + stage.width - RH/2} y={stage.y + stage.height/2 - RH/2} width={RH} height={RH}
+					role="presentation"
 					onpointerdown={(e) => startStageResize(e, 'right')} />
-				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<rect class="rh rh-ns" x={stage.x + stage.width/2 - RH/2} y={stage.y + stage.height - RH/2} width={RH} height={RH}
+					role="presentation"
 					onpointerdown={(e) => startStageResize(e, 'bottom')} />
-				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<rect class="rh rh-nwse" x={stage.x + stage.width - RH/2} y={stage.y + stage.height - RH/2} width={RH} height={RH}
+					role="presentation"
 					onpointerdown={(e) => startStageResize(e, 'br')} />
 
 				{#each tables as t (t.id)}
-					<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 					<g
 						onpointerdown={(e) => startTableDrag(e, t.id)}
 						onclick={(e) => clickTable(e, t.id)}
+						onkeydown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								clickTable(e, t.id);
+							}
+						}}
+						role="presentation"
 						style="cursor:{activeTool === 'select' ? 'grab' : 'default'}"
 					>
 						{#if t.shape === 'round'}
@@ -529,19 +536,19 @@
 					<!-- Table resize handles (only when selected) -->
 					{#if selectedId === t.id}
 						{#if t.shape === 'rectangle'}
-							<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 							<rect class="rh rh-ew" x={t.x + t.width - RH/2} y={t.y + t.height/2 - RH/2} width={RH} height={RH}
+								role="presentation"
 								onpointerdown={(e) => startResize(e, t.id, 'right')} />
-							<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 							<rect class="rh rh-ns" x={t.x + t.width/2 - RH/2} y={t.y + t.height - RH/2} width={RH} height={RH}
+								role="presentation"
 								onpointerdown={(e) => startResize(e, t.id, 'bottom')} />
-							<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 							<rect class="rh rh-nwse" x={t.x + t.width - RH/2} y={t.y + t.height - RH/2} width={RH} height={RH}
+								role="presentation"
 								onpointerdown={(e) => startResize(e, t.id, 'br')} />
 						{:else}
 							<!-- Round: radius handle on east -->
-							<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 							<rect class="rh rh-ew" x={t.x + t.width - RH/2} y={t.y + t.height/2 - RH/2} width={RH} height={RH}
+								role="presentation"
 								onpointerdown={(e) => startResize(e, t.id, 'radius')} />
 						{/if}
 					{/if}
@@ -570,7 +577,6 @@
 	.page-shell { max-width: 1600px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
 	.page-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 	h1, p { margin: 0; }
-	.eyebrow { margin-bottom: 0.25rem; color: var(--accent); font-size: 0.78rem; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; }
 	.head-actions { display: flex; align-items: center; gap: 0.75rem; }
 	.layout-name { min-height: 38px; border: 1px solid var(--line); border-radius: 7px; padding: 0.5rem 0.75rem; background: var(--surface); color: var(--text); font: inherit; font-weight: 800; }
 	.save-btn { border: 0; border-radius: 8px; padding: 0.75rem 1.2rem; background: var(--accent); color: #fff; font-weight: 900; cursor: pointer; transition: background 0.2s; }
