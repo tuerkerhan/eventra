@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
+import nodeAdapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 
 export default defineConfig({
@@ -8,7 +9,8 @@ export default defineConfig({
 			compilerOptions: {
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
-			}
+			},
+			adapter: nodeAdapter()
 		})
 	],
 	test: {
