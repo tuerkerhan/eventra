@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..core.deps import get_current_user
 from ..database import get_db
-from ..models import ContractTemplate, Event, EventFormFieldDef, EventType, Salon, SalonUser
+from ..models import ContractTemplate, Event, EventFormFieldDef, EventType, EventTypeFieldDef, Salon, SalonUser
 from ..schemas import ContractTemplateOut
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
@@ -79,9 +79,10 @@ def _build_replacements(event: Event, salon: Salon, custom_field_defs: list | No
         "%kdv_orani%": f"%{salon.vat_rate:.0f}",
     }
 
-    # Merge custom field values that have a placeholder_tag
+    # Merge custom field values. Custom fields can define an explicit contract
+    # placeholder; otherwise the field key works as "%field_key%".
     if custom_field_defs:
-        tag_map = {d.key: d.placeholder_tag for d in custom_field_defs if d.placeholder_tag}
+        tag_map = {d.key: getattr(d, "placeholder_tag", "") or f"%{d.key}%" for d in custom_field_defs}
         for cf in (event.custom_fields or []):
             tag = tag_map.get(cf.key)
             if tag:
@@ -253,7 +254,7 @@ def generate_contract(
 ):
     event = (
         db.query(Event)
-        .options(joinedload(Event.event_type))
+        .options(joinedload(Event.event_type), joinedload(Event.custom_fields))
         .filter(Event.id == event_id, Event.salon_id == user.salon_id)
         .first()
     )
@@ -274,8 +275,11 @@ def generate_contract(
     custom_defs = db.query(EventFormFieldDef).filter(
         EventFormFieldDef.salon_id == user.salon_id,
         EventFormFieldDef.is_builtin == False,
-        EventFormFieldDef.placeholder_tag != "",
     ).all()
+    type_custom_defs = db.query(EventTypeFieldDef).filter(
+        EventTypeFieldDef.salon_id == user.salon_id,
+    ).all()
+    custom_defs = [*custom_defs, *type_custom_defs]
     replacements = _build_replacements(event, salon, custom_defs)
 
     if tmpl.file_type == "docx":

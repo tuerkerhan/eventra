@@ -36,12 +36,12 @@
 
 		<form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
 			<div class="input-group">
-				<label for="email">E-posta</label>
+				<label for="email">Kullanıcı adı</label>
 				<input 
-					type="email" 
+					type="text" 
 					id="email" 
 					bind:value={email} 
-					placeholder="E-posta adresiniz..." 
+					placeholder="Kullanıcı adınız..." 
 					required 
 				/>
 			</div>
@@ -190,7 +190,7 @@
 		letter-spacing: 0.5px;
 	}
 
-	input[type="email"],
+	input[type="text"],
 	input[type="password"] {
 		background: #1C2438;
 		border: 1px solid rgba(212, 175, 55, 0.3);

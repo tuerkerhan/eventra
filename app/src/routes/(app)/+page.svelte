@@ -48,6 +48,16 @@
 		try { await api.post(`/notifications/${id}/read`, {}); } catch {}
 	}
 
+	async function deleteNotification(id: string) {
+		const previous = notifications;
+		notifications = notifications.filter(n => n.id !== id);
+		try {
+			await api.del(`/notifications/${id}`);
+		} catch {
+			notifications = previous;
+		}
+	}
+
 	// Müşteriye mail gönder
 	let mailAppointmentNo = $state('');
 	let mailSubject = $state('');
@@ -236,7 +246,21 @@
 							<strong>{n.title}</strong>
 							<span>{n.message}</span>
 						</div>
-						<small>{formatRelative(n.created_at)}</small>
+						<div class="notif-actions">
+							<small>{formatRelative(n.created_at)}</small>
+							<button
+								class="notif-delete"
+								type="button"
+								title="Bildirimi sil"
+								aria-label="Bildirimi sil"
+								onclick={(e) => {
+									e.stopPropagation();
+									deleteNotification(n.id);
+								}}
+							>
+								Sil
+							</button>
+						</div>
 					</div>
 				{:else}
 					<p class="empty">Henüz bildirim yok.</p>
@@ -300,7 +324,10 @@
 	.notif-main { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 	.notif-main strong { font-size: 0.84rem; }
 	.notif-main span { color: var(--muted); font-size: 0.78rem; }
+	.notif-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; }
 	.notif-row small { color: var(--muted); white-space: nowrap; font-size: 0.72rem; }
+	.notif-delete { border: 1px solid color-mix(in srgb, #dc2626 35%, var(--line)); border-radius: 8px; background: color-mix(in srgb, #dc2626 7%, var(--surface)); color: #dc2626; font-size: 0.72rem; font-weight: 900; line-height: 1; padding: 0.4rem 0.5rem; cursor: pointer; }
+	.notif-delete:hover { background: color-mix(in srgb, #dc2626 14%, var(--surface)); }
 	.mail-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.85rem; }
 	.mail-form label { display: flex; flex-direction: column; gap: 0.35rem; font-weight: 800; font-size: 0.82rem; }
 	.mail-form label.full { grid-column: 1 / -1; }

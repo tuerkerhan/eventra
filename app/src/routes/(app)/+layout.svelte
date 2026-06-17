@@ -29,6 +29,8 @@
 				activeSalonId.set(layouts[0]?.id ?? '');
 			}
 		} catch {}
+
+		api.post('/notification-settings/check-send', {}).catch(() => {});
 	});
 
 	const menuItems = [

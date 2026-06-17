@@ -31,12 +31,21 @@ class AdminCreateIn(BaseModel):
 
 class SalonCreateIn(BaseModel):
     name: str
+    company_name: str = ""
     address: str = ""
+    city: str = ""
+    postal_code: str = ""
+    phone: str = ""
+    website: str = ""
     currency: str = "TRY"
     vat_rate: float = 20.0
     contract_prefix: str = "EVT"
     reminder_days: int = 3
-    max_users: int = 1
+    salon_count: int = 1
+    max_users: int = 5
+    subscription_start: str = ""
+    subscription_end: str = ""
+    notification_email: str = ""
     owner_email: str
     owner_username: str
     owner_password: str
@@ -45,12 +54,21 @@ class SalonCreateIn(BaseModel):
 class SalonOut(BaseModel):
     id: str
     name: str
+    company_name: str = ""
     address: str
+    city: str = ""
+    postal_code: str = ""
+    phone: str = ""
+    website: str = ""
     currency: str
     vat_rate: float
     contract_prefix: str
+    contract_no: int = 0
     reminder_days: int
+    salon_count: int = 1
     max_users: int
+    subscription_start: str = ""
+    subscription_end: str = ""
     created_at: datetime
     payment_bank_name: str = ""
     payment_iban: str = ""
@@ -89,6 +107,10 @@ class SalonUserCreateIn(BaseModel):
 # ─── Settings ────────────────────────────────────────────────────────────────
 
 class UserPrefsOut(BaseModel):
+    id: str
+    email: str
+    username: str
+    role: str
     ui_mode: str
 
     model_config = {"from_attributes": True}
@@ -100,11 +122,20 @@ class UserPrefsUpdate(BaseModel):
 
 class SalonUpdateIn(BaseModel):
     name: str | None = None
+    company_name: str | None = None
     address: str | None = None
+    city: str | None = None
+    postal_code: str | None = None
+    phone: str | None = None
+    website: str | None = None
     currency: str | None = None
     vat_rate: float | None = None
     contract_prefix: str | None = None
     reminder_days: int | None = None
+    salon_count: int | None = None
+    max_users: int | None = None
+    subscription_start: str | None = None
+    subscription_end: str | None = None
     payment_bank_name: str | None = None
     payment_iban: str | None = None
     payment_account_holder: str | None = None
@@ -116,6 +147,91 @@ class SalonUpdateIn(BaseModel):
     smtp_from_email: str | None = None
     smtp_use_tls: bool | None = None
     notification_email: str | None = None
+
+
+# ─── Admin Settings ───────────────────────────────────────────────────────────
+
+class AdminSettingsIn(BaseModel):
+    support_phone: str = ""
+    booking_link: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_use_tls: bool = True
+    shared_support_email: str = ""
+
+
+class AdminSettingsOut(BaseModel):
+    id: str
+    support_phone: str
+    booking_link: str
+    smtp_host: str
+    smtp_port: int
+    smtp_username: str
+    smtp_password: str
+    smtp_from_email: str
+    smtp_use_tls: bool
+    shared_support_email: str
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Support Tickets ──────────────────────────────────────────────────────────
+
+class SupportTicketIn(BaseModel):
+    title: str
+    urgency: str = "normal"
+    description: str = ""
+
+
+class SupportTicketOut(BaseModel):
+    id: str
+    salon_id: str
+    salon_name: str = ""
+    user_id: str | None
+    title: str
+    urgency: str
+    description: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SupportTicketUpdateIn(BaseModel):
+    status: str | None = None
+
+
+# ─── Admin Notifications ──────────────────────────────────────────────────────
+
+class AdminNotificationOut(BaseModel):
+    id: str
+    type: str
+    title: str
+    message: str
+    salon_id: str | None
+    ref_id: str | None
+    is_read: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Admin Broadcast ──────────────────────────────────────────────────────────
+
+class AdminBroadcastIn(BaseModel):
+    subject: str
+    body: str
+    salon_ids: list[str] | None = None  # None = all
+    send_email: bool = True
+    send_notification: bool = True
+
+
+class AdminTestMailIn(BaseModel):
+    to_email: str
 
 
 class CustomerFieldDefIn(BaseModel):
@@ -268,6 +384,7 @@ class EventIn(BaseModel):
     note: str = ""
     reminder_enabled: bool = False
     reminder_date: str = ""
+    notifications_enabled: bool = True
     staff: str = ""
     customer_id: str | None = None
     layout_id: str | None = None
@@ -343,6 +460,7 @@ class EventOut(BaseModel):
     note: str
     reminder_enabled: bool
     reminder_date: str
+    notifications_enabled: bool = True
     staff: str
     customer_id: str | None
     layout_id: str | None
@@ -354,6 +472,7 @@ class EventOut(BaseModel):
     portal_org_type_id: str | None
     portal_form_type_id: str | None
     portal_layout_permission: bool
+    portal_photos: list[dict] = []
     reserved_layout_ids: list[str] = []
     custom_fields: list[EventCustomFieldOut] = []
     created_at: datetime
@@ -478,6 +597,7 @@ class PortalEventInfo(BaseModel):
     payment_complete: bool = False
     customer_payment_claimed: bool = False
     portal_message: str = ""
+    portal_photos: list[dict] = []
 
 
 class PortalSeatSubmit(BaseModel):
@@ -681,6 +801,37 @@ class NotificationOut(BaseModel):
     message: str
     is_read: bool
     created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Notification Templates ────────────────────────────────────────────────────
+
+class NotificationTemplateIn(BaseModel):
+    event_type_id: str
+    days_before: int
+    message_template: str = ""
+    is_active: bool = True
+
+
+class NotificationTemplateOut(BaseModel):
+    id: str
+    event_type_id: str | None
+    days_before: int
+    message_template: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class EventNotificationScheduleOut(BaseModel):
+    id: str
+    days_before: int
+    message: str
+    send_date: str
+    is_sent: bool
+    sent_at: datetime | None
 
     model_config = {"from_attributes": True}
 

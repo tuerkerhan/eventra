@@ -6,10 +6,21 @@
 	let { children } = $props();
 	let token = $state('');
 
-	onMount(() => {
+	let unreadCount = $state(0);
+
+	onMount(async () => {
 		const t = localStorage.getItem('admin_token');
-		if (!t) goto('/login');
-		else token = t;
+		if (!t) { goto('/login'); return; }
+		token = t;
+		try {
+			const r = await fetch(`${import.meta.env.VITE_API_URL ?? 'http://localhost:8000'}/admin/notifications/unread-count`, {
+				headers: { Authorization: `Bearer ${t}` }
+			});
+			if (r.ok) {
+				const d = await r.json();
+				unreadCount = d.count ?? 0;
+			}
+		} catch {}
 	});
 
 	const logout = () => {
@@ -18,7 +29,11 @@
 	};
 
 	const navItems = [
-		{ name: 'Salonlar & Hesaplar', path: '/accounts' }
+		{ name: 'Salonlar & Hesaplar', path: '/accounts' },
+		{ name: 'Mesaj Gönder', path: '/broadcast' },
+		{ name: 'Destek Talepleri', path: '/tickets' },
+		{ name: 'Bildirimler', path: '/notifications' },
+		{ name: 'Ayarlar', path: '/admin-settings' },
 	];
 </script>
 
@@ -30,7 +45,12 @@
 		</div>
 		<nav class="sidebar-nav">
 			{#each navItems as item}
-				<a href={item.path} class="nav-link" class:active={$page.url.pathname === item.path}>{item.name}</a>
+				<a href={item.path} class="nav-link" class:active={$page.url.pathname === item.path}>
+					{item.name}
+					{#if item.path === '/notifications' && unreadCount > 0}
+						<span class="notif-dot">{unreadCount}</span>
+					{/if}
+				</a>
 			{/each}
 		</nav>
 		<button class="logout-btn" type="button" onclick={logout}>Çıkış Yap</button>
@@ -62,6 +82,8 @@
 	}
 	.nav-link:hover, .nav-link.active { background: rgba(197,155,49,0.12); color: #f8fafc; }
 	.nav-link.active { color: #c59b31; }
+
+	.notif-dot { margin-left: auto; min-width: 20px; height: 20px; border-radius: 99px; background: #ef4444; color: #fff; font-size: 0.7rem; font-weight: 900; display: grid; place-items: center; padding: 0 0.35rem; }
 
 	.logout-btn {
 		margin-top: auto; border: 1px solid rgba(239,68,68,0.3); border-radius: 8px; padding: 0.65rem;

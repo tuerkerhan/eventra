@@ -1,4 +1,5 @@
 import smtplib
+from email.utils import formataddr
 from email.mime.text import MIMEText
 
 
@@ -10,7 +11,8 @@ def send_email(salon, to_email: str | None, subject: str, body: str) -> tuple[bo
     try:
         msg = MIMEText(body, "plain", "utf-8")
         msg["Subject"] = subject
-        msg["From"] = salon.smtp_from_email or salon.smtp_username
+        sender_name = salon.company_name or salon.name or "Eventra"
+        msg["From"] = formataddr((sender_name, salon.smtp_username))
         msg["To"] = to_email
         with smtplib.SMTP(salon.smtp_host, salon.smtp_port or 587, timeout=10) as server:
             if salon.smtp_use_tls:

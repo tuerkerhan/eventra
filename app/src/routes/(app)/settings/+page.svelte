@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, type SalonApi, type EventTypeApi, type OrgTypeFieldApi, type EventFormFieldDefApi, type EventTypeFieldDefApi, type CustomerFormTypeApi, type CustomerFormTypeFieldApi, type VenueLayoutApi } from '$lib/api';
+	import { api, type SalonApi, type EventTypeApi, type OrgTypeFieldApi, type EventFormFieldDefApi, type EventTypeFieldDefApi, type CustomerFormTypeApi, type CustomerFormTypeFieldApi, type VenueLayoutApi, type NotificationTemplateApi, type SalonUserApi, type SupportTicketApi } from '$lib/api';
 
 	type FieldType = 'text' | 'number' | 'date' | 'time' | 'textarea' | 'select' | 'checkbox';
 	const FIELD_TYPE_LABELS: Record<FieldType, string> = {
 		text: 'Metin', number: 'Sayı', date: 'Tarih', time: 'Saat',
 		textarea: 'Uzun Metin', select: 'Seçenek', checkbox: 'Onay Kutusu'
 	};
+	const EVENT_FIELD_TYPE_LABELS = FIELD_TYPE_LABELS;
 
 	const PLACEHOLDER_OPTIONS = [
 		'%randevu_no%','%isim%','%tc_no%','%telefon%','%email%','%adres%','%tarih%',
@@ -55,22 +56,57 @@
 	let newEtfType = $state<FieldType>('text');
 	let newEtfOptions = $state('');
 
+	// Bildirim şablonları
+	let notifTemplates = $state<NotificationTemplateApi[]>([]);
+	let editingTemplateId = $state<string | null>(null);
+	let newNotifDays = $state(7);
+	let newNotifMessage = $state('');
+	let selectedNotifTypeId = $state('');
+
+	// Kullanıcılar
+	let salonUsers = $state<SalonUserApi[]>([]);
+	let currentUserRole = $state<string>('');
+	let newUserEmail = $state('');
+	let newUserUsername = $state('');
+	let newUserPassword = $state('');
+	let addingUser = $state(false);
+	let addUserError = $state('');
+
+	// Teknik Destek
+	let tickets = $state<SupportTicketApi[]>([]);
+	let supportInfo = $state<{ support_phone: string; booking_link: string }>({ support_phone: '', booking_link: '' });
+	let newTicketTitle = $state('');
+	let newTicketUrgency = $state('normal');
+	let newTicketDesc = $state('');
+	let creatingTicket = $state(false);
+	let ticketError = $state('');
+
 	const selectedFormType = $derived(customerFormTypes.find(t => t.id === selectedFormTypeId) ?? null);
 
 	onMount(async () => {
 		try {
-			const [s, cfTypes, ffdefs, etypes, layouts] = await Promise.all([
+			const [s, me, cfTypes, ffdefs, etypes, layouts, notifTmpls, users, tks, sInfo] = await Promise.all([
 				api.get<SalonApi>('/settings/salon'),
+				api.get<{ id: string; role: string; email: string; username: string; ui_mode: string }>('/settings/me'),
 				api.get<CustomerFormTypeApi[]>('/customer-forms/types'),
 				api.get<EventFormFieldDefApi[]>('/event-form-fields'),
 				api.get<EventTypeApi[]>('/events/types'),
-				api.get<VenueLayoutApi[]>('/venue/layouts')
+				api.get<VenueLayoutApi[]>('/venue/layouts'),
+				api.get<NotificationTemplateApi[]>('/notification-settings/templates'),
+				api.get<SalonUserApi[]>('/settings/users'),
+				api.get<SupportTicketApi[]>('/support'),
+				api.get<{ support_phone: string; booking_link: string }>('/support/admin-info'),
 			]);
 			salon = { ...s };
+			currentUserRole = me.role;
 			customerFormTypes = cfTypes;
 			formFieldDefs = ffdefs;
 			eventTypes = etypes;
 			venueLayouts = layouts;
+			notifTemplates = notifTmpls;
+			salonUsers = users;
+			tickets = tks;
+			supportInfo = sInfo;
 			if (cfTypes.length > 0) {
 				selectedFormTypeId = cfTypes[0].id;
 				await loadFormTypeFields(cfTypes[0].id);
@@ -78,11 +114,52 @@
 			if (etypes.length > 0) {
 				selectedEtypeId = etypes[0].id;
 				await loadEtypeFields(etypes[0].id);
+				selectedNotifTypeId = etypes[0].id;
+				await loadNotifTemplates(etypes[0].id);
 			}
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Yükleme hatası';
 		}
 	});
+
+	async function loadNotifTemplates(typeId: string) {
+		notifTemplates = await api.get<NotificationTemplateApi[]>(`/notification-settings/templates?event_type_id=${typeId}`);
+	}
+
+	async function selectNotifType(typeId: string) {
+		selectedNotifTypeId = typeId;
+		editingTemplateId = null;
+		await loadNotifTemplates(typeId);
+	}
+
+	async function addNotifTemplate() {
+		if (!newNotifMessage.trim() || newNotifDays < 1 || !selectedNotifTypeId) return;
+		const t = await api.post<NotificationTemplateApi>('/notification-settings/templates', {
+			event_type_id: selectedNotifTypeId,
+			days_before: newNotifDays,
+			message_template: newNotifMessage.trim(),
+			is_active: true
+		});
+		notifTemplates = [...notifTemplates, t].sort((a, b) => b.days_before - a.days_before);
+		newNotifDays = 7;
+		newNotifMessage = '';
+	}
+
+	async function saveNotifTemplate(t: NotificationTemplateApi) {
+		const updated = await api.patch<NotificationTemplateApi>(`/notification-settings/templates/${t.id}`, {
+			event_type_id: t.event_type_id,
+			days_before: t.days_before,
+			message_template: t.message_template,
+			is_active: t.is_active
+		});
+		notifTemplates = notifTemplates.map(x => x.id === updated.id ? updated : x);
+		editingTemplateId = null;
+	}
+
+	async function deleteNotifTemplate(id: string) {
+		await api.del(`/notification-settings/templates/${id}`);
+		notifTemplates = notifTemplates.filter(t => t.id !== id);
+	}
 
 	async function loadEtypeFields(typeId: string) {
 		etypeFields = await api.get<EventTypeFieldDefApi[]>(`/event-type-fields?type_id=${typeId}`);
@@ -136,9 +213,13 @@
 				smtp_port: salon.smtp_port,
 				smtp_username: salon.smtp_username,
 				smtp_password: salon.smtp_password,
-				smtp_from_email: salon.smtp_from_email,
 				smtp_use_tls: salon.smtp_use_tls,
-				notification_email: salon.notification_email
+				notification_email: salon.notification_email,
+				company_name: salon.company_name,
+				city: salon.city,
+				postal_code: salon.postal_code,
+				phone: salon.phone,
+				website: salon.website
 			});
 			salon = { ...updated };
 			saved = true;
@@ -163,7 +244,6 @@
 				smtp_port: salon.smtp_port,
 				smtp_username: salon.smtp_username,
 				smtp_password: salon.smtp_password,
-				smtp_from_email: salon.smtp_from_email,
 				smtp_use_tls: salon.smtp_use_tls
 			});
 			smtpTestResult = result;
@@ -229,13 +309,14 @@
 		const label = newEfLabel.trim();
 		if (!label) return;
 		const slug = label.toLocaleLowerCase('tr-TR').replaceAll(' ', '_').replace(/[^a-z0-9_]/gi, '');
+		const key = slug || `custom_${formFieldDefs.length}`;
 		const options = newEfOptions.split(',').map(s => s.trim()).filter(Boolean);
 		const f = await api.post<EventFormFieldDefApi>('/event-form-fields', {
-			key: slug || `custom_${formFieldDefs.length}`,
+			key,
 			label,
 			field_type: newEfType,
 			options,
-			placeholder_tag: newEfTag,
+			placeholder_tag: newEfTag.trim() || `%${key}%`,
 			sort_order: formFieldDefs.length
 		});
 		formFieldDefs = [...formFieldDefs, f];
@@ -288,7 +369,59 @@
 		}
 	}
 
-	type SettingsTab = 'genel' | 'odeme' | 'etkinlik-tipleri' | 'musteri-formu' | 'etkinlik-formu' | 'salonlar';
+	// User management
+	async function addSalonUser() {
+		if (!newUserEmail.trim() || !newUserUsername.trim() || !newUserPassword.trim()) return;
+		addingUser = true;
+		addUserError = '';
+		try {
+			const u = await api.post<SalonUserApi>('/settings/users', {
+				email: newUserEmail.trim(),
+				username: newUserUsername.trim(),
+				password: newUserPassword,
+				role: 'staff'
+			});
+			salonUsers = [...salonUsers, u];
+			newUserEmail = ''; newUserUsername = ''; newUserPassword = '';
+		} catch (e) {
+			addUserError = e instanceof Error ? e.message : 'Kullanıcı eklenemedi';
+		} finally {
+			addingUser = false;
+		}
+	}
+
+	async function removeSalonUser(id: string) {
+		if (!confirm('Bu kullanıcıyı kaldırmak istediğinizden emin misiniz?')) return;
+		await api.del(`/settings/users/${id}`);
+		salonUsers = salonUsers.filter(u => u.id !== id);
+	}
+
+	// Support tickets
+	async function createTicket() {
+		if (!newTicketTitle.trim() || !newTicketDesc.trim()) return;
+		creatingTicket = true;
+		ticketError = '';
+		try {
+			const t = await api.post<SupportTicketApi>('/support', {
+				title: newTicketTitle.trim(),
+				urgency: newTicketUrgency,
+				description: newTicketDesc.trim()
+			});
+			tickets = [t, ...tickets];
+			newTicketTitle = ''; newTicketDesc = ''; newTicketUrgency = 'normal';
+		} catch (e) {
+			ticketError = e instanceof Error ? e.message : 'Talep oluşturulamadı';
+		} finally {
+			creatingTicket = false;
+		}
+	}
+
+	async function closeTicket(id: string) {
+		const t = await api.patch<SupportTicketApi>(`/support/${id}/close`, {});
+		tickets = tickets.map(x => x.id === id ? t : x);
+	}
+
+	type SettingsTab = 'genel' | 'odeme' | 'etkinlik-tipleri' | 'musteri-formu' | 'etkinlik-formu' | 'salonlar' | 'bildirimler' | 'kullanicilar' | 'teknik-destek';
 	let activeTab = $state<SettingsTab>('genel');
 	const TABS: { id: SettingsTab; label: string }[] = [
 		{ id: 'genel',          label: 'Genel' },
@@ -297,14 +430,14 @@
 		{ id: 'etkinlik-tipleri', label: 'Etkinlik Tipleri' },
 		{ id: 'musteri-formu',  label: 'Müşteri Formu' },
 		{ id: 'etkinlik-formu', label: 'Randevu Kayıt Formu' },
+		{ id: 'bildirimler',    label: 'Bildirimler' },
+		{ id: 'kullanicilar',   label: 'Kullanıcılar' },
+		{ id: 'teknik-destek',  label: 'Teknik Destek' },
 	];
 </script>
 
 <section class="page-shell">
 	<div class="page-heading">
-		<div>
-			<h1>Salon Ayarları</h1>
-		</div>
 	</div>
 
 	{#if loadError}
@@ -333,6 +466,9 @@
 						<label class="full"><span>Salon Adı</span><input value={salon.name} readonly /></label>
 						<label class="full"><span>Adres</span><textarea rows="2" readonly>{salon.address}</textarea></label>
 						<label><span>Sözleşme No Prefix</span><input value={salon.contract_prefix} readonly /></label>
+						{#if salon.contract_no}
+							<label><span>Sözleşme No</span><input value={salon.contract_no} readonly /></label>
+						{/if}
 						<label><span>Para Birimi</span><input value={salon.currency} readonly /></label>
 						<label><span>KDV Oranı (%)</span><input type="number" bind:value={salon.vat_rate} /></label>
 						<label><span>Hatırlatma Günü</span><input type="number" bind:value={salon.reminder_days} /></label>
@@ -391,9 +527,8 @@
 					<div class="form-grid">
 						<label><span>SMTP Sunucu</span><input placeholder="smtp.gmail.com" bind:value={salon.smtp_host} /></label>
 						<label><span>Port</span><input type="number" placeholder="587" bind:value={salon.smtp_port} /></label>
-						<label><span>Kullanıcı Adı (gönderme maili)</span><input placeholder="ornek@gmail.com" bind:value={salon.smtp_username} /></label>
+						<label><span>SMTP Kullanıcı Adı</span><input placeholder="ornek@gmail.com" bind:value={salon.smtp_username} /></label>
 						<label><span>Şifre</span><input type="password" bind:value={salon.smtp_password} /></label>
-						<label><span>Gönderen Mail (From)</span><input placeholder="ornek@gmail.com" bind:value={salon.smtp_from_email} /></label>
 						<label class="checkbox-inline-row"><input type="checkbox" bind:checked={salon.smtp_use_tls} /> TLS kullan</label>
 						<label class="full"><span>Bildirim Maili</span>
 							<input placeholder="kendi@mailiniz.com" bind:value={salon.notification_email} />
@@ -571,7 +706,7 @@
 							<label><span>Alan Adı</span><input placeholder="Örn: Ek Bilgi" bind:value={newEfLabel} /></label>
 							<label><span>Tip</span>
 								<select bind:value={newEfType}>
-									{#each Object.entries(FIELD_TYPE_LABELS) as [val, lbl]}
+									{#each Object.entries(EVENT_FIELD_TYPE_LABELS) as [val, lbl]}
 										<option value={val}>{lbl}</option>
 									{/each}
 								</select>
@@ -579,8 +714,9 @@
 							{#if newEfType === 'select'}
 								<label class="full"><span>Seçenekler (virgülle ayır)</span><input placeholder="Seçenek 1, Seçenek 2" bind:value={newEfOptions} /></label>
 							{/if}
-							<label class="full"><span>Sözleşme Etiketi <span class="opt-hint">(opsiyonel)</span></span>
+							<label class="full"><span>Sözleşme Etiketi</span>
 								<input bind:value={newEfTag} placeholder="%ozel_alan%" list="ph-list" />
+								<small class="opt-hint">Boş bırakırsan alan adına göre otomatik oluşturulur.</small>
 								<datalist id="ph-list">
 									{#each PLACEHOLDER_OPTIONS as ph}<option value={ph}>{ph}</option>{/each}
 								</datalist>
@@ -621,7 +757,7 @@
 							<label><span>Alan Adı</span><input placeholder="Örn: Gelin ve Damat" bind:value={newEtfLabel} /></label>
 							<label><span>Tip</span>
 								<select bind:value={newEtfType}>
-									{#each Object.entries(FIELD_TYPE_LABELS) as [val, lbl]}
+									{#each Object.entries(EVENT_FIELD_TYPE_LABELS) as [val, lbl]}
 										<option value={val}>{lbl}</option>
 									{/each}
 								</select>
@@ -633,8 +769,202 @@
 						</div>
 					</div>
 				</div>
-			{/if}
 
+			<!-- ── BİLDİRİMLER ── -->
+			{:else if activeTab === 'bildirimler'}
+				<div class="form-section">
+					<div class="section-header">
+						<h2>Bildirim Şablonları</h2>
+						<p class="hint">Her etkinlik tipine göre ayrı bildirim planı tanımlayın. Etkinlik oluşturulduğunda o tipe ait şablonlardan otomatik plan oluşturulur.</p>
+						<p class="hint">Değişkenler: <span class="ph-tag">%randevu_no%</span> <span class="ph-tag">%baslik%</span> <span class="ph-tag">%full_name%</span> <span class="ph-tag">%tarih%</span></p>
+					</div>
+
+					<div class="etype-chip-row">
+						{#each eventTypes as t}
+							<button type="button" class="etype-chip" class:active={selectedNotifTypeId === t.id}
+								style="--c:{t.color}" onclick={() => selectNotifType(t.id)}>{t.name}</button>
+						{/each}
+					</div>
+
+					{#if !selectedNotifTypeId}
+						<p class="empty-hint">Bir etkinlik tipi seçin.</p>
+					{:else}
+					<div class="field-list">
+						{#each notifTemplates as tmpl (tmpl.id)}
+							<div class="field-row notif-row">
+								{#if editingTemplateId === tmpl.id}
+									<div class="notif-edit-form">
+										<label>
+											<span>Gün Önce</span>
+											<input type="number" min="1" bind:value={tmpl.days_before} />
+										</label>
+										<label class="full">
+											<span>Mesaj</span>
+											<textarea rows="3" bind:value={tmpl.message_template}></textarea>
+										</label>
+										<div class="notif-edit-actions">
+											<label class="check-label">
+												<input type="checkbox" bind:checked={tmpl.is_active} />
+												Aktif
+											</label>
+											<button class="save-btn" type="button" onclick={() => saveNotifTemplate(tmpl)}>Kaydet</button>
+											<button class="del-btn" type="button" onclick={() => (editingTemplateId = null)}>İptal</button>
+										</div>
+									</div>
+								{:else}
+									<div class="notif-badge" class:inactive={!tmpl.is_active}>
+										{tmpl.days_before} gün
+									</div>
+									<div class="field-info">
+										<strong>{tmpl.message_template.slice(0, 80)}{tmpl.message_template.length > 80 ? '…' : ''}</strong>
+										<span>{tmpl.is_active ? 'Aktif' : 'Pasif'}</span>
+									</div>
+									<button class="vis-btn" type="button" onclick={() => (editingTemplateId = tmpl.id)}>✏️</button>
+									<button class="del-btn" type="button" onclick={() => deleteNotifTemplate(tmpl.id)}>Sil</button>
+								{/if}
+							</div>
+						{/each}
+						{#if notifTemplates.length === 0}
+							<p class="empty-hint">Henüz şablon yok. Aşağıdan ekleyebilirsiniz.</p>
+						{/if}
+					</div>
+
+					<div class="subsection">
+						<h3>Yeni Şablon Ekle</h3>
+						<div class="field-add-form">
+							<label>
+								<span>Gün Önce</span>
+								<input type="number" min="1" bind:value={newNotifDays} placeholder="10" />
+							</label>
+							<div></div>
+							<label class="full">
+								<span>Mesaj</span>
+								<textarea rows="3" bind:value={newNotifMessage} placeholder="Sayın %full_name%, Randevu No: %randevu_no% - '%baslik%' etkinliğinize gün kaldı."></textarea>
+							</label>
+							<button class="add-field-btn" type="button" onclick={addNotifTemplate}>Şablon Ekle</button>
+						</div>
+					</div>
+					{/if}
+				</div>
+
+		<!-- ── KULLANICILAR ── -->
+		{:else if activeTab === 'kullanicilar'}
+			<div class="form-section">
+				<div class="section-header">
+					<h2>Kullanıcı Hesapları</h2>
+					<p class="hint">Maksimum {salon.max_users} kullanıcı. Hesap sahibi yeni personel ekleyebilir.</p>
+				</div>
+
+				<div class="user-list">
+					{#each salonUsers as u (u.id)}
+						<div class="user-card">
+							<div class="user-avatar">{u.username.charAt(0).toUpperCase()}</div>
+							<div class="user-info">
+								<strong>{u.username}</strong>
+								<span>Giriş: {u.email}</span>
+							</div>
+							<span class="role-badge" class:owner={u.role === 'owner'}>{u.role === 'owner' ? 'Salon Sahibi' : 'Personel'}</span>
+							{#if currentUserRole === 'owner' && u.role !== 'owner'}
+								<button class="del-btn" type="button" onclick={() => removeSalonUser(u.id)}>Kaldır</button>
+							{/if}
+						</div>
+					{/each}
+				</div>
+
+				{#if currentUserRole === 'owner' && salonUsers.length < salon.max_users}
+					<div class="subsection">
+						<h3>Yeni Personel Ekle</h3>
+						{#if addUserError}
+							<div class="error-bar">{addUserError}</div>
+						{/if}
+						<div class="field-add-form">
+							<label><span>Giriş Kullanıcı Adı *</span><input bind:value={newUserEmail} /></label>
+							<label><span>Görünen Ad *</span><input bind:value={newUserUsername} /></label>
+							<label><span>Şifre *</span><input type="password" bind:value={newUserPassword} /></label>
+							<div></div>
+							<button class="add-field-btn" type="button" onclick={addSalonUser} disabled={addingUser}>
+								{addingUser ? 'Ekleniyor…' : 'Kullanıcı Ekle'}
+							</button>
+						</div>
+					</div>
+				{:else}
+					<p class="hint" style="padding-top:0.5rem">Maksimum kullanıcı sayısına ulaşıldı ({salon.max_users}/{salon.max_users}).</p>
+				{/if}
+			</div>
+
+		<!-- ── TEKNİK DESTEK ── -->
+		{:else if activeTab === 'teknik-destek'}
+			<div class="form-section">
+				<div class="section-header">
+					<h2>Teknik Destek</h2>
+					<p class="hint">Sorun yaşıyorsanız destek talebi açın veya randevu alın.</p>
+				</div>
+
+				{#if supportInfo.support_phone || supportInfo.booking_link}
+					<div class="support-contact-row">
+						{#if supportInfo.support_phone}
+							<a class="support-contact-btn" href="tel:{supportInfo.support_phone}">
+								📞 {supportInfo.support_phone}
+							</a>
+						{/if}
+						{#if supportInfo.booking_link}
+							<a class="support-contact-btn booking" href={supportInfo.booking_link} target="_blank" rel="noreferrer">
+								📅 Randevu Al
+							</a>
+						{/if}
+					</div>
+				{/if}
+
+				<div class="subsection">
+					<h3>Yeni Destek Talebi</h3>
+					{#if ticketError}
+						<div class="error-bar">{ticketError}</div>
+					{/if}
+					<div class="field-add-form">
+						<label class="full"><span>Başlık *</span><input bind:value={newTicketTitle} placeholder="Sorun başlığı" /></label>
+						<label>
+							<span>Aciliyet</span>
+							<select bind:value={newTicketUrgency}>
+								<option value="low">Düşük</option>
+								<option value="normal">Normal</option>
+								<option value="high">Yüksek</option>
+								<option value="critical">Kritik</option>
+							</select>
+						</label>
+						<div></div>
+						<label class="full"><span>Açıklama *</span><textarea rows="3" bind:value={newTicketDesc} placeholder="Sorunu detaylıca açıklayın…"></textarea></label>
+						<button class="add-field-btn" type="button" onclick={createTicket} disabled={creatingTicket}>
+							{creatingTicket ? 'Gönderiliyor…' : 'Talep Gönder'}
+						</button>
+					</div>
+				</div>
+
+				{#if tickets.length > 0}
+					<div class="subsection">
+						<h3>Taleplerim</h3>
+						<div class="ticket-list">
+							{#each tickets as t (t.id)}
+								<div class="ticket-card" data-status={t.status}>
+									<div class="ticket-header">
+										<strong>{t.title}</strong>
+										<span class="ticket-status" data-status={t.status}>{t.status === 'open' ? 'Açık' : 'Kapalı'}</span>
+									</div>
+									<p class="ticket-desc">{t.description}</p>
+									<div class="ticket-meta">
+										<span class="urgency-badge" data-urgency={t.urgency}>{t.urgency === 'low' ? 'Düşük' : t.urgency === 'normal' ? 'Normal' : t.urgency === 'high' ? 'Yüksek' : 'Kritik'}</span>
+										<span class="ticket-date">{new Date(t.created_at).toLocaleDateString('tr-TR')}</span>
+										{#if t.status === 'open'}
+											<button class="del-btn" type="button" onclick={() => closeTicket(t.id)}>Kapat</button>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+					</div>
+				{/if}
+			</div>
+
+		{/if}
 		</div>
 	{:else if !loadError}
 		<div class="loading">Yükleniyor…</div>
@@ -644,7 +974,7 @@
 <style>
 	/* ── Layout ── */
 	.page-shell { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
-	h1, h2, h3, p { margin: 0; }
+	h2, h3, p { margin: 0; }
 
 	/* ── Tab bar ── */
 	.tab-bar { display: flex; gap: 0.25rem; border-bottom: 2px solid var(--line); padding-bottom: 0; overflow-x: auto; }
@@ -729,5 +1059,43 @@
 	.type-color-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.15); }
 	.type-color-input { width: 32px; height: 32px; min-height: 32px; border: 0; padding: 0; background: transparent; cursor: pointer; border-radius: 6px; flex-shrink: 0; }
 
+	/* ── Bildirim şablonları ── */
+	.notif-row { align-items: flex-start; flex-wrap: wrap; }
+	.notif-badge { min-width: 60px; text-align: center; padding: 0.35rem 0.65rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 900; font-size: 0.82rem; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); white-space: nowrap; }
+	.notif-badge.inactive { background: var(--surface-strong); color: var(--muted); border-color: var(--line); }
+	.notif-edit-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; width: 100%; }
+	.notif-edit-form .full { grid-column: 1 / -1; }
+	.notif-edit-actions { grid-column: 1 / -1; display: flex; gap: 0.5rem; align-items: center; }
+
 	@media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } .form-grid .full { grid-column: 1; } }
+
+	/* ── Kullanıcılar ── */
+	.user-list { display: flex; flex-direction: column; gap: 0.5rem; }
+	.user-card { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 8px; }
+	.user-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); display: grid; place-items: center; font-weight: 900; font-size: 1rem; color: #fff; flex-shrink: 0; }
+	.user-info { display: flex; flex-direction: column; gap: 0.1rem; flex: 1; }
+	.user-info strong { font-size: 0.88rem; }
+	.user-info span { font-size: 0.76rem; color: var(--muted); }
+	.role-badge { font-size: 0.7rem; font-weight: 900; padding: 0.18rem 0.5rem; border-radius: 99px; background: var(--surface); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+	.role-badge.owner { background: color-mix(in srgb, var(--accent) 15%, transparent); border-color: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--accent); }
+
+	/* ── Teknik Destek ── */
+	.support-contact-row { display: flex; gap: 0.65rem; flex-wrap: wrap; }
+	.support-contact-btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.65rem 1rem; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-strong); color: var(--text); text-decoration: none; font-weight: 800; font-size: 0.88rem; }
+	.support-contact-btn.booking { border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); }
+	.ticket-list { display: flex; flex-direction: column; gap: 0.65rem; }
+	.ticket-card { padding: 0.85rem; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; gap: 0.45rem; }
+	.ticket-card[data-status="closed"] { opacity: 0.65; }
+	.ticket-header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+	.ticket-header strong { font-size: 0.9rem; }
+	.ticket-desc { font-size: 0.82rem; color: var(--muted); }
+	.ticket-meta { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+	.ticket-date { font-size: 0.75rem; color: var(--muted); margin-left: auto; }
+	.ticket-status[data-status="open"] { font-size: 0.72rem; font-weight: 900; padding: 0.15rem 0.45rem; border-radius: 99px; background: color-mix(in srgb, #16a34a 15%, transparent); color: #16a34a; border: 1px solid color-mix(in srgb, #16a34a 30%, transparent); }
+	.ticket-status[data-status="closed"] { font-size: 0.72rem; font-weight: 900; padding: 0.15rem 0.45rem; border-radius: 99px; background: var(--surface); color: var(--muted); border: 1px solid var(--line); }
+	.urgency-badge { font-size: 0.7rem; font-weight: 900; padding: 0.15rem 0.45rem; border-radius: 99px; border: 1px solid var(--line); }
+	.urgency-badge[data-urgency="low"] { color: #64748b; }
+	.urgency-badge[data-urgency="normal"] { color: #2563eb; background: rgba(37,99,235,0.08); border-color: rgba(37,99,235,0.2); }
+	.urgency-badge[data-urgency="high"] { color: #d97706; background: rgba(217,119,6,0.08); border-color: rgba(217,119,6,0.2); }
+	.urgency-badge[data-urgency="critical"] { color: #dc2626; background: rgba(220,38,38,0.08); border-color: rgba(220,38,38,0.2); }
 </style>

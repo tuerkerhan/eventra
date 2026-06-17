@@ -102,8 +102,17 @@ def delete_layout(layout_id: str, user: SalonUser = Depends(get_current_user), d
 
 # ─── Guest seating (per event) ────────────────────────────────────────────────
 
+def _get_own_event(event_id: str, salon_id: str, db: Session):
+    from ..models import Event
+    event = db.query(Event).filter(Event.id == event_id, Event.salon_id == salon_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Etkinlik bulunamadı")
+    return event
+
+
 @router.get("/events/{event_id}/seatings", response_model=list[GuestSeatOut])
 def list_seatings(event_id: str, user: SalonUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    _get_own_event(event_id, user.salon_id, db)
     return db.query(GuestSeating).filter(GuestSeating.event_id == event_id).all()
 
 
@@ -114,6 +123,19 @@ def save_seatings(
     user: SalonUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _get_own_event(event_id, user.salon_id, db)
+    # Validate that every supplied table_id belongs to this salon's layouts
+    if body:
+        table_ids = {s.table_id for s in body if s.table_id}
+        if table_ids:
+            valid_ids = {
+                r[0] for r in db.query(VenueTable.id)
+                .join(VenueLayout, VenueTable.layout_id == VenueLayout.id)
+                .filter(VenueLayout.salon_id == user.salon_id, VenueTable.id.in_(table_ids))
+                .all()
+            }
+            if table_ids - valid_ids:
+                raise HTTPException(status_code=403, detail="Geçersiz masa referansı")
     db.query(GuestSeating).filter(GuestSeating.event_id == event_id).delete()
     db.flush()
     rows = [GuestSeating(event_id=event_id, **s.model_dump()) for s in body]

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api, type EventApi, type SalonApi, type ExpenseApi } from '$lib/api';
+	import { activeSalonId } from '$lib/activeSalon';
 
 	// ─── State ────────────────────────────────────────────────────────────────
 	let events = $state<EventApi[]>([]);
@@ -11,6 +12,7 @@
 	let tryPerEUR_raw = $state(0);
 	let rateDate = $state('');
 	let rateLoading = $state(true);
+	let financeScope = $state<'all' | 'salon'>('all');
 
 	// Aktif sekme
 	let tab = $state<'ozet' | 'odemeler' | 'araclar'>('ozet');
@@ -52,6 +54,10 @@
 
 	// Ödemeler listesi filtresi
 	let listFilter = $state<'all' | 'unpaid' | 'paid' | 'needsAmount'>('all');
+
+	$effect(() => {
+		if (!$activeSalonId && financeScope === 'salon') financeScope = 'all';
+	});
 
 	const today = new Date();
 	today.setHours(0, 0, 0, 0);
@@ -137,8 +143,17 @@
 	// ─── KPI türetmeleri ──────────────────────────────────────────────────────
 	const thisKey = $derived(monthKey(0));
 	const prevKey = $derived(monthKey(-1));
-	const thisEvents = $derived(events.filter(e => e.event_date.startsWith(thisKey)));
-	const prevEvents = $derived(events.filter(e => e.event_date.startsWith(prevKey)));
+	const scopedEvents = $derived.by(() => {
+		if (financeScope === 'all' || !$activeSalonId) return events;
+		return events.filter(e => e.layout_id === $activeSalonId || e.reserved_layout_ids?.includes($activeSalonId));
+	});
+	const scopedEventIds = $derived(new Set(scopedEvents.map(e => e.id)));
+	const scopedExpenses = $derived.by(() => {
+		if (financeScope === 'all' || !$activeSalonId) return expenses;
+		return expenses.filter(e => e.event_id ? scopedEventIds.has(e.event_id) : false);
+	});
+	const thisEvents = $derived(scopedEvents.filter(e => e.event_date.startsWith(thisKey)));
+	const prevEvents = $derived(scopedEvents.filter(e => e.event_date.startsWith(prevKey)));
 	const grossIncome = $derived(thisEvents.reduce((s, e) => s + e.total_fee, 0));
 	const collected = $derived(thisEvents.reduce((s, e) => s + e.total_paid, 0));
 	const prevGross = $derived(prevEvents.reduce((s, e) => s + e.total_fee, 0));
@@ -147,22 +162,22 @@
 	const incomeChange = $derived(prevGross > 0 ? ((grossIncome - prevGross) / prevGross) * 100 : null);
 
 	const thisExpensesTRY = $derived(
-		expenses.filter(e => e.due_date.startsWith(thisKey)).reduce((s, e) => s + toTRY(e.amount, e.currency), 0)
+		scopedExpenses.filter(e => e.due_date.startsWith(thisKey)).reduce((s, e) => s + toTRY(e.amount, e.currency), 0)
 	);
 	const prevExpensesTRY = $derived(
-		expenses.filter(e => e.due_date.startsWith(prevKey)).reduce((s, e) => s + toTRY(e.amount, e.currency), 0)
+		scopedExpenses.filter(e => e.due_date.startsWith(prevKey)).reduce((s, e) => s + toTRY(e.amount, e.currency), 0)
 	);
 	const expenseChange = $derived(prevExpensesTRY > 0 ? ((thisExpensesTRY - prevExpensesTRY) / prevExpensesTRY) * 100 : null);
 	const netProfit = $derived(grossIncome - thisExpensesTRY);
 	const profitMargin = $derived(grossIncome > 0 ? (netProfit / grossIncome) * 100 : 0);
 
 	const unpaidExpenses = $derived(
-		expenses.filter(e => !e.is_paid).sort((a, b) => a.due_date.localeCompare(b.due_date))
+		scopedExpenses.filter(e => !e.is_paid).sort((a, b) => a.due_date.localeCompare(b.due_date))
 	);
 	const overdue = $derived(unpaidExpenses.filter(e => e.is_approved && daysLeft(e.due_date) < 0));
 	const dueSoon = $derived(unpaidExpenses.filter(e => { const d = daysLeft(e.due_date); return e.is_approved && d >= 0 && d <= 7; }));
 	const unpaidTotal = $derived(unpaidExpenses.reduce((s, e) => s + toTRY(e.amount, e.currency), 0));
-	const needsAmount = $derived(expenses.filter(e => e.amount_type === 'variable' && !e.is_approved));
+	const needsAmount = $derived(scopedExpenses.filter(e => e.amount_type === 'variable' && !e.is_approved));
 
 	// ─── Grafik ───────────────────────────────────────────────────────────────
 	const chartMonths = $derived.by(() => {
@@ -170,8 +185,8 @@
 			const d = new Date(today.getFullYear(), today.getMonth() - (chartPeriod - 1 - i), 1);
 			const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 			const label = d.toLocaleDateString('tr-TR', { month: 'short' });
-			const inc = events.filter(e => e.event_date.startsWith(key)).reduce((s, e) => s + e.total_fee, 0);
-			const exp = expenses.filter(e => e.due_date.startsWith(key)).reduce((s, e) => s + toTRY(e.amount, e.currency), 0);
+			const inc = scopedEvents.filter(e => e.event_date.startsWith(key)).reduce((s, e) => s + e.total_fee, 0);
+			const exp = scopedExpenses.filter(e => e.due_date.startsWith(key)).reduce((s, e) => s + toTRY(e.amount, e.currency), 0);
 			return { key, label, income: fromTRY(inc), expense: fromTRY(exp) };
 		});
 	});
@@ -211,14 +226,14 @@
 	const filteredList = $derived.by(() => {
 		switch (listFilter) {
 			case 'unpaid': return unpaidExpenses;
-			case 'paid': return expenses.filter(e => e.is_paid).sort((a, b) => b.due_date.localeCompare(a.due_date));
+			case 'paid': return scopedExpenses.filter(e => e.is_paid).sort((a, b) => b.due_date.localeCompare(a.due_date));
 			case 'needsAmount': return needsAmount;
-			default: return [...expenses].sort((a, b) => b.due_date.localeCompare(a.due_date));
+			default: return [...scopedExpenses].sort((a, b) => b.due_date.localeCompare(a.due_date));
 		}
 	});
 
 	const recurringGroups = $derived.by(() => {
-		const rec = expenses.filter(e => e.recurrence !== 'once');
+		const rec = scopedExpenses.filter(e => e.recurrence !== 'once');
 		const map = new Map<string, ExpenseApi[]>();
 		for (const e of rec) {
 			const k = `${e.title}__${e.currency}__${e.recurrence}`;
@@ -334,10 +349,6 @@
 
 	<!-- ─── HEADER ────────────────────────────────────────────────────────── -->
 	<div class="db-header">
-		<div>
-			<h1>Yönetim Paneli</h1>
-			<p class="subtitle">Gelir, gider ve ödeme takibi.</p>
-		</div>
 		<div class="header-right">
 			<div class="rate-box">
 				{#if rateLoading}
@@ -351,10 +362,16 @@
 					<span class="muted">Kur alınamadı</span>
 				{/if}
 			</div>
-			<div class="currency-toggle">
-				{#each (['TRY', 'USD', 'EUR'] as const) as c}
-					<button class:active={displayCurrency === c} onclick={() => (displayCurrency = c)} type="button">{c}</button>
-				{/each}
+			<div class="header-controls">
+				<div class="scope-toggle" aria-label="Finansal özet kapsamı">
+					<button class:active={financeScope === 'all'} onclick={() => (financeScope = 'all')} type="button">Tümü</button>
+					<button class:active={financeScope === 'salon'} onclick={() => (financeScope = 'salon')} type="button" disabled={!$activeSalonId}>Salon</button>
+				</div>
+				<div class="currency-toggle">
+					{#each (['TRY', 'USD', 'EUR'] as const) as c}
+						<button class:active={displayCurrency === c} onclick={() => (displayCurrency = c)} type="button">{c}</button>
+					{/each}
+				</div>
 			</div>
 		</div>
 	</div>
@@ -509,7 +526,7 @@
 		<div class="section-head">
 			<div>
 				<h2>Giderler</h2>
-				<p>{expenses.length} kayıt · {unpaidExpenses.length} ödenmemiş</p>
+				<p>{scopedExpenses.length} kayıt · {unpaidExpenses.length} ödenmemiş</p>
 			</div>
 			<button class="primary-btn" type="button" onclick={() => (showForm = true)}>+ Gider Ekle</button>
 		</div>
@@ -519,7 +536,7 @@
 			<div class="kpi-card {overdue.length > 0 ? 'bad' : ''}">
 				<span>Vadesi Geçen</span>
 				<strong>{overdue.length}</strong>
-				<small style="color:#dc2626">{overdue.length > 0 ? fmtTL(overdue.reduce((s,e)=>s+e.amount,0)) : 'Yok'}</small>
+				<small style="color:#dc2626">{overdue.length > 0 ? fmtTL(overdue.reduce((s,e)=>s+toTRY(e.amount,e.currency),0)) : 'Yok'}</small>
 			</div>
 			<div class="kpi-card {dueSoon.length > 0 ? 'warn' : ''}">
 				<span>Bu Hafta Vadesi Dolan</span>
@@ -681,9 +698,9 @@
 			</div>
 		{/if}
 
-		{#if expenses.length === 0}
+		{#if scopedExpenses.length === 0}
 			<div class="panel empty-state">
-				<p>Henüz gider kaydı yok.</p>
+				<p>{financeScope === 'salon' ? 'Bu salon için gider kaydı yok.' : 'Henüz gider kaydı yok.'}</p>
 				<button class="primary-btn" type="button" onclick={() => (showForm = true)}>İlk gideri ekle</button>
 			</div>
 		{/if}
@@ -867,16 +884,20 @@
 
 	/* Header */
 	.db-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-	h1 { margin: 0; font-size: clamp(1.8rem, 3vw, 2.8rem); }
 	h2 { margin: 0; font-size: 1.1rem; }
-	p, h1, h2 { margin: 0; }
-	.subtitle { color: var(--muted); margin-top: 0.2rem; }
+	p { margin: 0; }
 	.header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 0.6rem; }
 	.rate-box { display: flex; align-items: center; gap: 0.65rem; font-size: 0.84rem; }
 	.rate-item { display: flex; align-items: center; gap: 0.3rem; }
 	.rate-flag { font-size: 1rem; }
 	.rate-sep { color: var(--line); }
 	.rate-date { color: var(--muted); font-size: 0.75rem; }
+	.header-controls { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; justify-content: flex-end; }
+	.scope-toggle { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+	.scope-toggle button { padding: 0.45rem 0.85rem; font-weight: 900; font-size: 0.82rem; background: var(--surface-strong); color: var(--muted); border: none; cursor: pointer; transition: all 0.15s; }
+	.scope-toggle button + button { border-left: 1px solid var(--line); }
+	.scope-toggle button.active { background: #2563eb; color: #fff; }
+	.scope-toggle button:disabled { opacity: 0.45; cursor: not-allowed; }
 	.currency-toggle { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 	.currency-toggle button { padding: 0.45rem 0.85rem; font-weight: 800; font-size: 0.82rem; background: var(--surface-strong); color: var(--muted); border: none; cursor: pointer; transition: all 0.15s; }
 	.currency-toggle button.active { background: var(--accent); color: #fff; }

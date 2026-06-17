@@ -37,6 +37,7 @@
 		payment_complete: boolean;
 		customer_payment_claimed: boolean;
 		portal_message: string;
+		portal_photos: { name: string; url: string }[];
 	}
 
 	const token = $derived($page.params.token);
@@ -47,6 +48,7 @@
 	let formData = $state<Record<string, string>>({});
 	let submitting = $state(false);
 	let submitted = $state(false);
+	let submitMessage = $state('');
 	let mounted = $state(false);
 	let paymentClaiming = $state(false);
 	let paymentClaimed = $state(false);
@@ -92,14 +94,20 @@
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		submitting = true;
+		error = '';
 		try {
 			const res = await fetch(`${API}/portal/${token}/form`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ data: formData })
 			});
-			if (!res.ok) throw new Error('Gönderme başarısız');
+			if (!res.ok) {
+				const detail = await res.json().catch(() => ({}));
+				throw new Error((detail as { detail?: string }).detail || 'Gönderme başarısız');
+			}
 			submitted = true;
+			submitMessage = 'Bilgileriniz iletildi.';
+			setTimeout(() => { submitMessage = ''; }, 4500);
 		} catch (ex) {
 			error = ex instanceof Error ? ex.message : 'Hata oluştu';
 		} finally {
@@ -187,35 +195,11 @@
 				<p class="state-text">Yükleniyor…</p>
 			</div>
 
-		{:else if error}
+		{:else if error && !info}
 			<div class="state-card error-card animate-in">
 				<div class="state-icon error-icon">✕</div>
 				<h2>Portal Bulunamadı</h2>
 				<p>{error}</p>
-			</div>
-
-		{:else if submitted}
-			<div class="state-card success-card animate-in">
-				<div class="success-burst">
-					<img src="/crown-icon.png" alt="" class="success-crown" />
-					<div class="state-icon success-icon">✓</div>
-				</div>
-				<h2>Teşekkürler!</h2>
-				<p>Organizasyon bilgileriniz başarıyla iletildi.<br/>En kısa sürede sizinle iletişime geçeceğiz.</p>
-				{#if info?.portal_layout_permission && info.reserved_layouts.length > 0}
-					<div class="seating-prompt">
-						<p class="seating-prompt-label">Salon oturma düzeninizi de oluşturabilirsiniz:</p>
-						<div class="layout-buttons">
-							{#each info.reserved_layouts as layout}
-								<button onclick={() => goToSeating(layout.id)} class="seating-btn">
-									<span class="seating-btn-icon">🪑</span>
-									{layout.name} — Misafir Yerleşimi
-									<span class="seating-btn-arrow">→</span>
-								</button>
-							{/each}
-						</div>
-					</div>
-				{/if}
 			</div>
 
 		{:else if info}
@@ -256,6 +240,19 @@
 				<div class="message-card animate-in" style="animation-delay:0.1s">
 					<span class="message-icon">✉️</span>
 					<p>{info.portal_message}</p>
+				</div>
+			{/if}
+
+			<!-- Admin photos -->
+			{#if (info.portal_photos ?? []).length > 0}
+				<div class="admin-photos-card animate-in" style="animation-delay:0.12s">
+					<div class="admin-photos-grid">
+						{#each info.portal_photos as photo}
+							<a href="{API}{photo.url}" target="_blank" class="admin-photo-thumb">
+								<img src="{API}{photo.url}" alt={photo.name} />
+							</a>
+						{/each}
+					</div>
 				</div>
 			{/if}
 
@@ -307,13 +304,16 @@
 						{#if error}
 							<p class="form-error">{error}</p>
 						{/if}
+						{#if submitMessage}
+							<p class="form-success">{submitMessage}</p>
+						{/if}
 
 						<div class="submit-wrap">
 							<button type="submit" class="submit-btn" disabled={submitting}>
 								{#if submitting}
 									<span class="btn-spinner"></span> Gönderiliyor…
 								{:else}
-									<img src="/crown-icon.png" alt="" class="btn-crown" /> Gönder
+									<img src="/crown-icon.png" alt="" class="btn-crown" /> {submitted ? 'Tekrar Gönder' : 'Gönder'}
 								{/if}
 							</button>
 						</div>
@@ -850,6 +850,7 @@
 	.form-title { font-size: 1.2rem; font-weight: 900; margin: 0 0 0.3rem; color: #f1f5f9; }
 	.form-subtitle { color: rgba(255,255,255,0.45); font-size: 0.86rem; margin: 0; }
 
+
 	.form-fields { display: flex; flex-direction: column; gap: 1.25rem; padding: 1.5rem 1.75rem; }
 
 	.field-group { display: flex; flex-direction: column; gap: 0.5rem; }
@@ -911,6 +912,7 @@
 	.range-val { font-weight: 800; color: #f0c040; min-width: 32px; text-align: right; font-size: 1rem; }
 
 	.form-error { color: #f87171; font-size: 0.85rem; padding: 0 1.75rem; margin: 0 0 0.5rem; }
+	.form-success { color: #4ade80; font-size: 0.85rem; font-weight: 800; padding: 0 1.75rem; margin: 0 0 0.5rem; }
 
 	/* Submit button */
 	.submit-wrap { padding: 0 1.75rem 1.75rem; }
@@ -1139,6 +1141,34 @@
 		font-size: 0.85rem;
 		flex-shrink: 0;
 	}
+
+	.admin-photos-card {
+		width: 100%;
+		padding: 1rem;
+		background: rgba(255,255,255,0.03);
+		border: 1px solid rgba(255,255,255,0.1);
+		border-radius: 16px;
+		backdrop-filter: blur(8px);
+	}
+	.admin-photos-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+		gap: 0.6rem;
+	}
+	.admin-photo-thumb {
+		display: block;
+		border-radius: 10px;
+		overflow: hidden;
+		border: 1px solid rgba(197,155,49,0.2);
+		aspect-ratio: 1;
+	}
+	.admin-photo-thumb img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		transition: transform 0.2s;
+	}
+	.admin-photo-thumb:hover img { transform: scale(1.05); }
 
 	.message-card {
 		display: flex;

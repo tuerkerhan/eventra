@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..core.deps import get_current_user
@@ -12,19 +13,23 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/token", response_model=TokenOut)
 def login(body: LoginIn, db: Session = Depends(get_db)):
+    identifier = body.email.strip()
     # Try salon user first
-    user = db.query(SalonUser).filter(SalonUser.email == body.email, SalonUser.is_active == True).first()
+    user = db.query(SalonUser).filter(
+        or_(SalonUser.email == identifier, SalonUser.username == identifier),
+        SalonUser.is_active == True,
+    ).first()
     if user and verify_password(body.password, user.hashed_password):
         token = create_access_token(user.id, {"role": "salon_user", "salon_id": user.salon_id})
         return TokenOut(access_token=token, role=user.role, salon_id=user.salon_id, username=user.username)
 
     # Try admin
-    admin = db.query(AdminUser).filter(AdminUser.email == body.email).first()
+    admin = db.query(AdminUser).filter(AdminUser.email == identifier).first()
     if admin and verify_password(body.password, admin.hashed_password):
         token = create_access_token(admin.id, {"role": "admin"})
         return TokenOut(access_token=token, role="admin")
 
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-posta veya şifre hatalı")
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Kullanıcı adı veya şifre hatalı")
 
 
 @router.get("/me")

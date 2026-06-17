@@ -1,16 +1,21 @@
+import os
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..core.deps import get_current_user
 from ..database import get_db
 from ..email_utils import send_email
-from ..models import Customer, Event, EventCustomField, EventLayoutReservation, EventType, PaymentInstallment, Salon, SalonUser, VenueLayout
+from ..models import Customer, Event, EventCustomField, EventLayoutReservation, EventNotificationSchedule, EventType, PaymentInstallment, Salon, SalonNotificationTemplate, SalonUser, VenueLayout
 from ..models import PortalFormSubmission
 from ..notify import notify
+from ..portal_uploads import delete_portal_event_uploads, delete_submission_photos, portal_event_dir
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_PORTAL_IMAGE_BYTES = 10 * 1024 * 1024
 from ..schemas import (
     EventCustomFieldIn,
     EventIn,
@@ -36,6 +41,7 @@ def _sync_payment(event: Event) -> None:
 def _build_event_out(event: Event) -> EventOut:
     data = EventOut.model_validate(event)
     data.reserved_layout_ids = [r.layout_id for r in (event.layout_reservations or [])]
+    data.portal_photos = list(event.portal_photos or [])
     return data
 
 
@@ -140,6 +146,57 @@ def list_events(
     return [_build_event_out(e) for e in q.order_by(Event.event_date).all()]
 
 
+def _sync_notification_schedules(event: Event, db: Session) -> None:
+    if not event.notifications_enabled or not event.event_date or not event.type_id:
+        return
+    try:
+        event_date = date.fromisoformat(event.event_date)
+    except ValueError:
+        return
+    from .notification_settings import ensure_defaults_for_type
+    ensure_defaults_for_type(event.salon_id, event.type_id, db)
+    already_sent_days = {
+        row[0]
+        for row in db.query(EventNotificationSchedule.days_before)
+        .filter(
+            EventNotificationSchedule.event_id == event.id,
+            EventNotificationSchedule.is_sent == True,
+        )
+        .all()
+    }
+    db.query(EventNotificationSchedule).filter(
+        EventNotificationSchedule.event_id == event.id,
+        EventNotificationSchedule.is_sent == False,
+    ).delete()
+    templates = (
+        db.query(SalonNotificationTemplate)
+        .filter(
+            SalonNotificationTemplate.salon_id == event.salon_id,
+            SalonNotificationTemplate.event_type_id == event.type_id,
+            SalonNotificationTemplate.is_active == True,
+        )
+        .all()
+    )
+    today = date.today()
+    for tmpl in templates:
+        if tmpl.days_before in already_sent_days:
+            continue
+        send_date = event_date - timedelta(days=tmpl.days_before)
+        if send_date >= today:
+            db.add(EventNotificationSchedule(
+                event_id=event.id,
+                salon_id=event.salon_id,
+                days_before=tmpl.days_before,
+                message=tmpl.message_template,
+                send_date=send_date.isoformat(),
+            ))
+
+
+def _send_due_notifications_for_salon(salon_id: str, db: Session) -> None:
+    from .notification_settings import check_and_send_notifications
+    check_and_send_notifications(db, salon_id=salon_id)
+
+
 def _next_appointment_no(salon_id: str, db: Session) -> int:
     max_no = db.query(func.max(Event.appointment_no)).filter(Event.salon_id == salon_id).scalar()
     return (max_no or 0) + 1
@@ -160,7 +217,10 @@ def create_event(body: EventIn, user: SalonUser = Depends(get_current_user), db:
     for i, cf in enumerate(body.custom_fields):
         db.add(EventCustomField(event_id=event.id, **{**cf.model_dump(), 'sort_order': i}))
     _sync_layout_reservations(event, body.reserved_layout_ids, db)
+    db.flush()
+    _sync_notification_schedules(event, db)
     db.commit()
+    _send_due_notifications_for_salon(user.salon_id, db)
     db.refresh(event)
     return _build_event_out(event)
 
@@ -220,7 +280,18 @@ def update_event(
     if body.reserved_layout_ids is not None:
         _sync_layout_reservations(event, body.reserved_layout_ids, db)
 
+    if "event_date" in data or "notifications_enabled" in data or "type_id" in data:
+        db.flush()
+        if not event.notifications_enabled:
+            db.query(EventNotificationSchedule).filter(
+                EventNotificationSchedule.event_id == event.id,
+                EventNotificationSchedule.is_sent == False,
+            ).delete()
+        else:
+            _sync_notification_schedules(event, db)
+
     db.commit()
+    _send_due_notifications_for_salon(user.salon_id, db)
     db.refresh(event)
     return _build_event_out(event)
 
@@ -230,6 +301,7 @@ def delete_event(event_id: str, user: SalonUser = Depends(get_current_user), db:
     event = db.query(Event).filter(Event.id == event_id, Event.salon_id == user.salon_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Etkinlik bulunamadı")
+    delete_portal_event_uploads(event.salon_id, event.id)
     db.delete(event)
     db.commit()
 
@@ -240,6 +312,87 @@ def list_portal_submissions(event_id: str, user: SalonUser = Depends(get_current
     if not event:
         raise HTTPException(status_code=404, detail="Etkinlik bulunamadı")
     return db.query(PortalFormSubmission).filter(PortalFormSubmission.event_id == event_id).order_by(PortalFormSubmission.submitted_at.desc()).all()
+
+
+@router.delete("/{event_id}/portal-submissions/{submission_id}", status_code=204)
+def delete_portal_submission(
+    event_id: str,
+    submission_id: str,
+    user: SalonUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    event = db.query(Event).filter(Event.id == event_id, Event.salon_id == user.salon_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Etkinlik bulunamadı")
+    submission = db.query(PortalFormSubmission).filter(
+        PortalFormSubmission.id == submission_id,
+        PortalFormSubmission.event_id == event.id,
+    ).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Form gönderisi bulunamadı")
+    delete_submission_photos(submission.data)
+    db.delete(submission)
+    db.commit()
+
+
+@router.post("/{event_id}/portal-photos", response_model=list[dict])
+async def upload_portal_photos(
+    event_id: str,
+    files: list[UploadFile] = File(...),
+    user: SalonUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    event = db.query(Event).filter(Event.id == event_id, Event.salon_id == user.salon_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Etkinlik bulunamadı")
+
+    target_dir = os.path.join(portal_event_dir(user.salon_id, event_id), "admin")
+    os.makedirs(target_dir, exist_ok=True)
+
+    existing = list(event.portal_photos or [])
+    for file in files:
+        if file.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="Yalnızca JPG, PNG, WEBP veya GIF yüklenebilir")
+        content = await file.read()
+        if len(content) > MAX_PORTAL_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail="Fotoğraf 10 MB'ı geçemez")
+        ext = os.path.splitext(file.filename or "")[1].lower() or ".jpg"
+        stored = f"{uuid.uuid4().hex}{ext}"
+        with open(os.path.join(target_dir, stored), "wb") as f:
+            f.write(content)
+        existing.append({
+            "name": file.filename or stored,
+            "url": f"/uploads/portal/{user.salon_id}/{event_id}/admin/{stored}",
+        })
+
+    event.portal_photos = existing
+    db.commit()
+    return existing
+
+
+@router.delete("/{event_id}/portal-photos/{photo_index}", status_code=204)
+def delete_portal_photo(
+    event_id: str,
+    photo_index: int,
+    user: SalonUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from ..portal_uploads import UPLOAD_ROOT
+    event = db.query(Event).filter(Event.id == event_id, Event.salon_id == user.salon_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Etkinlik bulunamadı")
+    photos = list(event.portal_photos or [])
+    if photo_index < 0 or photo_index >= len(photos):
+        raise HTTPException(status_code=404, detail="Fotoğraf bulunamadı")
+    photo = photos.pop(photo_index)
+    url = photo.get("url", "")
+    if url.startswith("/uploads/"):
+        rel = url[len("/uploads/"):]
+        path = os.path.abspath(os.path.join(UPLOAD_ROOT, rel))
+        if path.startswith(os.path.abspath(UPLOAD_ROOT)) and os.path.isfile(path):
+            os.remove(path)
+    event.portal_photos = photos
+    db.commit()
 
 
 @router.get("/{event_id}/payments", response_model=list[PaymentInstallmentOut])

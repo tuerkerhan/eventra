@@ -12,8 +12,16 @@
 		created_at: string;
 	}
 
+	interface EventFormFieldDef {
+		key: string;
+		label: string;
+		placeholder_tag: string;
+		is_builtin: boolean;
+	}
+
 	// ─── State ────────────────────────────────────────────────────────────────
 	let templates = $state<ContractTemplate[]>([]);
+	let fieldDefs = $state<EventFormFieldDef[]>([]);
 	let selectedTemplateId = $state<string | null>(null);
 
 	// Upload form
@@ -23,11 +31,15 @@
 	let uploadError = $state('');
 
 	onMount(async () => {
-		await loadTemplates().catch(() => {});
+		await Promise.all([loadTemplates(), loadFieldDefs()]).catch(() => {});
 	});
 
 	async function loadTemplates() {
 		templates = await api.get<ContractTemplate[]>('/contracts/templates');
+	}
+
+	async function loadFieldDefs() {
+		fieldDefs = await api.get<EventFormFieldDef[]>('/event-form-fields');
 	}
 
 	// ─── Upload ───────────────────────────────────────────────────────────────
@@ -84,7 +96,7 @@
 	// ─── Helpers ──────────────────────────────────────────────────────────────
 	const fileIcon = (t: string) => t === 'docx' ? '📝' : '📄';
 
-	const PLACEHOLDERS = [
+	const BASE_PLACEHOLDERS = [
 		{ key: '%randevu_no%',        label: 'Randevu no' },
 		{ key: '%isim%',              label: 'Müşteri adı soyadı' },
 		{ key: '%tc_no%',             label: 'T.C. / Vergi No' },
@@ -102,6 +114,17 @@
 		{ key: '%notlar%',            label: 'Form notu' },
 		{ key: '%salon_adi%',         label: 'Salon adı' },
 	];
+
+	const CUSTOM_PLACEHOLDERS = $derived(
+		fieldDefs
+			.filter((field) => !field.is_builtin)
+			.map((field) => ({
+				key: field.placeholder_tag || `%${field.key}%`,
+				label: field.label
+			}))
+	);
+
+	const PLACEHOLDERS = $derived([...BASE_PLACEHOLDERS, ...CUSTOM_PLACEHOLDERS]);
 
 	function copyPh(key: string) {
 		navigator.clipboard.writeText(key).catch(() => {});

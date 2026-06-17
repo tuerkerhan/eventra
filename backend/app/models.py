@@ -20,17 +20,76 @@ class AdminUser(Base):
     hashed_password = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    settings = relationship("AdminSettings", back_populates="admin", uselist=False, cascade="all, delete-orphan")
+
+
+class AdminSettings(Base):
+    __tablename__ = "admin_settings"
+    id = Column(String, primary_key=True, default=_uuid)
+    admin_id = Column(String, ForeignKey("admin_users.id"), nullable=False, unique=True)
+    support_phone = Column(String, default="")
+    booking_link = Column(String, default="")
+    smtp_host = Column(String, default="")
+    smtp_port = Column(Integer, default=587)
+    smtp_username = Column(String, default="")
+    smtp_password = Column(String, default="")
+    smtp_from_email = Column(String, default="")
+    smtp_use_tls = Column(Boolean, default=True)
+    shared_support_email = Column(String, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    admin = relationship("AdminUser", back_populates="settings")
+
+
+class AdminNotification(Base):
+    __tablename__ = "admin_notifications"
+    id = Column(String, primary_key=True, default=_uuid)
+    type = Column(String, nullable=False)  # ticket_new | ticket_reply | system
+    title = Column(String, default="")
+    message = Column(Text, default="")
+    salon_id = Column(String, ForeignKey("salons.id", ondelete="SET NULL"), nullable=True)
+    ref_id = Column(String, nullable=True)  # e.g. ticket id
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    salon = relationship("Salon")
+
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+    id = Column(String, primary_key=True, default=_uuid)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    user_id = Column(String, ForeignKey("salon_users.id"), nullable=True)
+    title = Column(String, nullable=False)
+    urgency = Column(String, default="normal")  # low | normal | high | critical
+    description = Column(Text, default="")
+    status = Column(String, default="open")  # open | in_progress | resolved | closed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    salon = relationship("Salon")
+    user = relationship("SalonUser")
+
 
 class Salon(Base):
     __tablename__ = "salons"
     id = Column(String, primary_key=True, default=_uuid)
     name = Column(String, nullable=False)
+    company_name = Column(String, default="")
     address = Column(Text, default="")
+    city = Column(String, default="")
+    postal_code = Column(String, default="")
+    phone = Column(String, default="")
+    website = Column(String, default="")
     currency = Column(String, default="TRY")
     vat_rate = Column(Float, default=20.0)
     contract_prefix = Column(String, default="EVT")
+    contract_no = Column(Integer, default=0)
     reminder_days = Column(Integer, default=3)
-    max_users = Column(Integer, default=1)
+    salon_count = Column(Integer, default=1)
+    max_users = Column(Integer, default=5)
+    subscription_start = Column(String, default="")
+    subscription_end = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     created_by_admin = Column(String, ForeignKey("admin_users.id"), nullable=True)
     # Payment info (bank details configured salon-wide; per-event toggle is on Event model)
@@ -180,6 +239,7 @@ class Event(Base):
     note = Column(Text, default="")
     reminder_enabled = Column(Boolean, default=False)
     reminder_date = Column(String, default="")
+    notifications_enabled = Column(Boolean, default=True)
     staff = Column(String, default="")
     layout_id = Column(String, ForeignKey("venue_layouts.id"), nullable=True)
     seating_enabled = Column(Boolean, default=False)
@@ -196,6 +256,7 @@ class Event(Base):
     portal_org_type_id = Column(String, ForeignKey("event_types.id"), nullable=True)
     portal_form_type_id = Column(String, nullable=True)  # references customer_form_types.id
     portal_layout_permission = Column(Boolean, default=False)
+    portal_photos = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -408,6 +469,35 @@ class Notification(Base):
 
     salon = relationship("Salon")
     event = relationship("Event")
+
+
+class SalonNotificationTemplate(Base):
+    __tablename__ = "salon_notification_templates"
+    id = Column(String, primary_key=True, default=_uuid)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    event_type_id = Column(String, ForeignKey("event_types.id", ondelete="CASCADE"), nullable=True)
+    days_before = Column(Integer, nullable=False)
+    message_template = Column(Text, default="")
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    salon = relationship("Salon")
+    event_type = relationship("EventType")
+
+
+class EventNotificationSchedule(Base):
+    __tablename__ = "event_notification_schedules"
+    id = Column(String, primary_key=True, default=_uuid)
+    event_id = Column(String, ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    salon_id = Column(String, ForeignKey("salons.id"), nullable=False)
+    days_before = Column(Integer, nullable=False)
+    message = Column(Text, default="")
+    send_date = Column(String, nullable=False)
+    is_sent = Column(Boolean, default=False)
+    sent_at = Column(DateTime, nullable=True)
+
+    event = relationship("Event")
+    salon = relationship("Salon")
 
 
 class PortalFormField(Base):

@@ -77,7 +77,7 @@
 		tc_no: string; full_name: string; mobile_phone: string; phone: string;
 		address: string; email: string;
 		guest_count: number; total_fee: number; kapora_amount: number;
-		note: string; reminder_enabled: boolean; reminder_date: string;
+		note: string; reminder_enabled: boolean; reminder_date: string; notifications_enabled: boolean;
 	};
 	let draftEvent = $state<DraftEvent | null>(null);
 	let draftCustomFields = $state<EventCustomFieldApi[]>([]);
@@ -169,6 +169,20 @@
 		});
 	});
 	const draftTypeFieldDefs = $derived(draftEvent?.type_id ? (typeFieldDefsCache[draftEvent.type_id] ?? []) : []);
+	const draftGlobalCustomFields = $derived.by(() => {
+		if (!draftEvent) return [];
+		return visibleCustomDefs.map(def => {
+			const existing = draftCustomFields.find(f => f.key === def.key);
+			return existing ?? { key: def.key, label: def.label, value: def.field_type === 'checkbox' ? 'false' : '', field_type: def.field_type, options: def.options, sort_order: def.sort_order };
+		});
+	});
+	const draftTypeCustomFields = $derived.by(() => {
+		if (!draftEvent) return [];
+		return draftTypeFieldDefs.map(def => {
+			const existing = draftCustomFields.find(f => f.key === def.key);
+			return existing ?? { key: def.key, label: def.label, value: def.field_type === 'checkbox' ? 'false' : '', field_type: def.field_type, options: def.options, sort_order: 1000 + def.sort_order };
+		});
+	});
 	const dayViewEvents = $derived(eventsForDay(new Date(clickedDate)));
 	const dayViewLayout = $derived(computeOverlapLayout(dayViewEvents));
 	const isToday = (dateStr: string) => dateStr === dateKey(new Date());
@@ -277,12 +291,13 @@
 			total_paid: ev.total_paid, payment_complete: ev.payment_complete, payment_enabled: ev.payment_enabled,
 			email: ev.email,
 			note: ev.note, reminder_enabled: ev.reminder_enabled,
-			reminder_date: ev.reminder_date, staff: ev.staff, customer_id: ev.customer_id,
+			reminder_date: ev.reminder_date, notifications_enabled: ev.notifications_enabled ?? true, staff: ev.staff, customer_id: ev.customer_id,
 			layout_id: ev.layout_id, seating_enabled: ev.seating_enabled,
 			portal_enabled: ev.portal_enabled, portal_title: ev.portal_title, portal_message: ev.portal_message,
 			portal_org_type_id: ev.portal_org_type_id,
 			portal_form_type_id: ev.portal_form_type_id,
 			portal_layout_permission: ev.portal_layout_permission,
+			portal_photos: ev.portal_photos ?? [],
 			reserved_layout_ids: ev.reserved_layout_ids, custom_fields: ev.custom_fields
 		};
 	}
@@ -351,14 +366,17 @@
 	function openDraft(eventDate: string, startTime = '19:00', endTime = '23:00') {
 		if (!requireActiveSalon()) return;
 		selectedEventId = null;
-		draftCustomFields = [];
+		draftCustomFields = visibleCustomDefs.map(def => ({
+			key: def.key, label: def.label, value: def.field_type === 'checkbox' ? 'false' : '',
+			field_type: def.field_type, options: def.options, sort_order: def.sort_order
+		}));
 		draftEvent = {
 			title: '', event_date: eventDate, start_time: startTime, end_time: endTime,
 			type_id: null, reservation_status: 'Ön Rezervasyon',
 			tc_no: '', full_name: '', mobile_phone: '', phone: '',
 			address: '', email: '',
 			guest_count: 0, total_fee: 0, kapora_amount: 0,
-			note: '', reminder_enabled: false, reminder_date: ''
+			note: '', reminder_enabled: false, reminder_date: '', notifications_enabled: true
 		};
 		focusTitleInput();
 	}
@@ -385,10 +403,16 @@
 		draftEvent = { ...draftEvent, type_id: typeId };
 		await ensureTypeFields(typeId);
 		const defs = typeFieldDefsCache[typeId] ?? [];
-		draftCustomFields = defs.map(def => ({
-			key: def.key, label: def.label, value: def.field_type === 'checkbox' ? 'false' : '',
-			field_type: def.field_type, options: def.options, sort_order: def.sort_order
-		}));
+		const globalKeys = new Set(visibleCustomDefs.map(def => def.key));
+		const globalFields = draftCustomFields.filter(field => globalKeys.has(field.key));
+		const typeFields = defs.map(def => {
+			const existing = draftCustomFields.find(field => field.key === def.key);
+			return existing ?? {
+				key: def.key, label: def.label, value: def.field_type === 'checkbox' ? 'false' : '',
+				field_type: def.field_type, options: def.options, sort_order: 1000 + def.sort_order
+			};
+		});
+		draftCustomFields = [...globalFields, ...typeFields];
 	}
 
 	function updateDraft<K extends keyof DraftEvent>(key: K, value: DraftEvent[K]) {
@@ -397,7 +421,16 @@
 	}
 
 	function updateDraftCustomField(key: string, value: string) {
-		draftCustomFields = draftCustomFields.map(f => f.key === key ? { ...f, value } : f);
+		const existing = draftCustomFields.find(f => f.key === key);
+		if (existing) {
+			draftCustomFields = draftCustomFields.map(f => f.key === key ? { ...f, value } : f);
+			return;
+		}
+		const def = formFieldDefs.find(d => d.key === key) ?? draftTypeFieldDefs.find(d => d.key === key);
+		draftCustomFields = [...draftCustomFields, {
+			key, label: def?.label ?? key, value,
+			field_type: def?.field_type ?? 'text', options: def?.options ?? [], sort_order: def?.sort_order ?? 0
+		}];
 	}
 
 	async function loadPayments(eventId: string) {
@@ -588,6 +621,40 @@
 			portalCopied = true;
 			setTimeout(() => (portalCopied = false), 2000);
 		});
+	}
+
+	let portalPhotoUploading = $state(false);
+
+	async function uploadPortalPhotos(e: Event) {
+		if (!selectedEvent) return;
+		const input = e.currentTarget as HTMLInputElement;
+		const files = Array.from(input.files ?? []);
+		if (!files.length) return;
+		input.value = '';
+		portalPhotoUploading = true;
+		const eventId = selectedEvent.id;
+		try {
+			const body = new FormData();
+			for (const f of files) body.append('files', f);
+			const photos = await api.postForm<{ name: string; url: string }[]>(
+				`/events/${eventId}/portal-photos`, body
+			);
+			events = events.map(ev => ev.id === eventId ? { ...ev, portal_photos: photos } : ev);
+		} finally {
+			portalPhotoUploading = false;
+		}
+	}
+
+	async function deletePortalPhoto(index: number) {
+		if (!selectedEvent) return;
+		const eventId = selectedEvent.id;
+		const prev = selectedEvent.portal_photos;
+		events = events.map(ev => ev.id === eventId ? { ...ev, portal_photos: prev.filter((_, i) => i !== index) } : ev);
+		try {
+			await api.del(`/events/${eventId}/portal-photos/${index}`);
+		} catch {
+			events = events.map(ev => ev.id === eventId ? { ...ev, portal_photos: prev } : ev);
+		}
 	}
 
 	// ── Day-view: create drag handlers ───────────────────────────────────────────
@@ -787,21 +854,20 @@
 								<strong>{day.getDate()}</strong>
 								{#if holidayForDay(day)}<small class="holiday">{holidayForDay(day)?.label}</small>{/if}
 							</div>
-							{#each eventsForDay(day).slice(0, 3) as item}
-								<button class="event-chip" style="--pay:{paymentColor(item)};--type:{typeColor(item.type_id)}"
-									type="button" onclick={(e) => { e.stopPropagation(); selectEvent(item.id); }}>
-									<span class="chip-time">{item.start_time}</span>
-									{item.title}
-									<span class="chip-ticks">
-										{#if item.kapora_paid}<span class="tick tick-k">K✓</span>{/if}
-										{#if item.payment_complete}<span class="tick tick-p">₺✓</span>{/if}
-										{#if item.portal_enabled}<span class="tick tick-portal">P</span>{/if}
-									</span>
-								</button>
-							{/each}
-							{#if eventsForDay(day).length > 3}
-								<span class="more-badge">+{eventsForDay(day).length - 3} daha</span>
-							{/if}
+							<div class="day-events">
+								{#each eventsForDay(day) as item}
+									<button class="event-chip" style="--pay:{paymentColor(item)};--type:{typeColor(item.type_id)}"
+										type="button" onclick={(e) => { e.stopPropagation(); selectEvent(item.id); }}>
+										<span class="chip-time">{item.start_time}</span>
+										<span class="chip-title">{item.title || item.full_name || 'Randevu'}</span>
+										<span class="chip-ticks">
+											{#if item.kapora_paid}<span class="tick tick-k">K✓</span>{/if}
+											{#if item.payment_complete}<span class="tick tick-p">₺✓</span>{/if}
+											{#if item.portal_enabled}<span class="tick tick-portal">P</span>{/if}
+										</span>
+									</button>
+								{/each}
+							</div>
 						</div>
 					{/each}
 				</div>
@@ -1011,14 +1077,43 @@
 							{#if draftEvent.reminder_enabled}
 								<label><span>Hatırlatma Tarihi</span><input type="date" value={draftEvent.reminder_date} oninput={(e) => updateDraft('reminder_date', e.currentTarget.value)} /></label>
 							{/if}
+							<label class="notif-toggle" class:disabled={!draftEvent.notifications_enabled}>
+								<input type="checkbox" checked={draftEvent.notifications_enabled} onchange={(e) => updateDraft('notifications_enabled', e.currentTarget.checked)} />
+								Mail Bildirimleri {draftEvent.notifications_enabled ? 'Açık' : 'Kapalı'}
+							</label>
 						</div>
 					</div>
 
-					{#if draftTypeFieldDefs.length > 0}
+					{#if draftGlobalCustomFields.length > 0}
+					<div class="custom-fields-section">
+						<h4>Ek Alanlar</h4>
+						<div class="attribute-list">
+							{#each draftGlobalCustomFields as field}
+								<label class="attribute-row">
+									<span>{field.label}</span>
+									{#if field.field_type === 'textarea'}
+										<textarea rows="2" value={field.value} oninput={(e) => updateDraftCustomField(field.key, e.currentTarget.value)}></textarea>
+									{:else if field.field_type === 'select'}
+										<select value={field.value} onchange={(e) => updateDraftCustomField(field.key, e.currentTarget.value)}>
+											<option value="">— Seçin —</option>
+											{#each field.options ?? [] as opt}<option value={opt}>{opt}</option>{/each}
+										</select>
+									{:else if field.field_type === 'checkbox'}
+										<label class="checkbox-inline"><input type="checkbox" checked={field.value === 'true'} onchange={(e) => updateDraftCustomField(field.key, String(e.currentTarget.checked))} />{field.label}</label>
+									{:else}
+										<input type={field.field_type} value={field.value} oninput={(e) => updateDraftCustomField(field.key, e.currentTarget.value)} />
+									{/if}
+								</label>
+							{/each}
+						</div>
+					</div>
+					{/if}
+
+					{#if draftTypeCustomFields.length > 0}
 					<div class="custom-fields-section">
 						<h4>Etkinlik Form Alanı</h4>
 						<div class="attribute-list">
-							{#each draftCustomFields as field}
+							{#each draftTypeCustomFields as field}
 								<label class="attribute-row">
 									<span>{field.label}</span>
 									{#if field.field_type === 'textarea'}
@@ -1181,6 +1276,10 @@
 								{#if selectedEvent.reminder_enabled}
 									<label><span>Hatırlatma Tarihi</span><input type="date" value={selectedEvent.reminder_date} oninput={(e) => updateSelected('reminder_date', e.currentTarget.value)} /></label>
 								{/if}
+								<label class="notif-toggle" class:disabled={!(selectedEvent.notifications_enabled ?? true)}>
+									<input type="checkbox" checked={selectedEvent.notifications_enabled ?? true} onchange={(e) => updateSelected('notifications_enabled', e.currentTarget.checked)} />
+									Mail Bildirimleri {(selectedEvent.notifications_enabled ?? true) ? 'Açık' : 'Kapalı'}
+								</label>
 							</div>
 							{/if}
 						</div>
@@ -1308,6 +1407,26 @@
 									</select>
 								</label>
 
+								<div class="portal-photos-section">
+									<span class="portal-photos-label">Portale Fotoğraf Ekle</span>
+									<small>Müşteri portalde bu fotoğrafları görecek.</small>
+									{#if (selectedEvent.portal_photos ?? []).length > 0}
+										<div class="portal-photo-grid">
+											{#each selectedEvent.portal_photos as photo, i}
+												<div class="portal-photo-item">
+													<img src="{API}{photo.url}" alt={photo.name} />
+													<button type="button" class="portal-photo-del" onclick={() => deletePortalPhoto(i)}>×</button>
+												</div>
+											{/each}
+										</div>
+									{/if}
+									<label class="portal-photo-upload-btn" class:uploading={portalPhotoUploading}>
+										<input type="file" accept="image/*" multiple disabled={portalPhotoUploading}
+											onchange={uploadPortalPhotos} />
+										{#if portalPhotoUploading}Yükleniyor…{:else}+ Fotoğraf Yükle{/if}
+									</label>
+								</div>
+
 								<label class="toggle-row">
 									<input type="checkbox" checked={selectedEvent.portal_layout_permission}
 										onchange={(e) => updateSelected('portal_layout_permission', e.currentTarget.checked)} />
@@ -1385,19 +1504,24 @@
 	.drawer-body { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
 	.weekday-row, .month-grid { display: grid; grid-template-columns: repeat(7, minmax(0,1fr)); gap: 0.4rem; }
 	.weekday-row { margin-bottom: 0.5rem; color: var(--muted); font-weight: 900; text-align: center; }
-	.month-grid { grid-template-rows: repeat(6, 1fr); height: calc(100vh - 330px); min-height: 420px; }
-	.day-cell { min-height: 0; padding: 0.5rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); cursor: pointer; overflow: hidden; display: flex; flex-direction: column; gap: 0.2rem; }
+	.month-grid { grid-template-rows: repeat(6, minmax(104px, 1fr)); height: calc(100vh - 300px); min-height: 520px; }
+	.day-cell { position: relative; min-height: 0; padding: 0.35rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-strong); cursor: pointer; overflow: hidden; display: flex; flex-direction: column; }
 	.day-cell:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-	.more-badge { font-size: 0.68rem; color: var(--muted); font-weight: 800; padding-left: 0.15rem; }
 	.selected-day { border-color: var(--accent) !important; background: color-mix(in srgb, var(--accent) 8%, var(--surface-strong)) !important; }
-	.today-day .day-top strong { background: var(--accent); color: #fff; border-radius: 50%; width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; }
+	.today-day .day-top strong { background: var(--accent); color: #fff; }
 	.muted-day { opacity: 0.4; }
-	.day-top { display: flex; align-items: center; justify-content: space-between; gap: 0.35rem; margin-bottom: 0.4rem; }
-	.holiday { color: var(--accent); font-size: 0.68rem; font-weight: 900; }
-	.event-chip { width: 100%; display: flex; align-items: center; gap: 0.3rem; margin-top: 0.3rem; padding: 0.38rem 0.45rem; font-weight: 900; font-size: 0.76rem; text-align: left; cursor: pointer; border: 1px solid color-mix(in srgb, var(--type) 32%, transparent); border-left: 5px solid var(--pay); border-radius: 7px; background: color-mix(in srgb, var(--type) 20%, var(--surface)); color: var(--text); }
-	.chip-time { color: var(--muted); font-size: 0.7rem; }
-	.chip-ticks { margin-left: auto; flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; }
-	.tick { font-size: 0.58rem; font-weight: 900; padding: 0.12rem 0.32rem; border-radius: 4px; line-height: 1.2; white-space: nowrap; }
+	.day-top { position: absolute; top: 0.3rem; left: 0.3rem; right: 0.3rem; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 0.35rem; pointer-events: none; }
+	.day-top strong { order: 2; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--surface) 84%, transparent); box-shadow: 0 0 0 1px var(--line); font-size: 0.78rem; font-weight: 900; flex-shrink: 0; }
+	.holiday { min-width: 0; max-width: calc(100% - 30px); padding: 0.15rem 0.35rem; border-radius: 5px; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); font-size: 0.62rem; font-weight: 900; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.day-events { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.22rem; overflow-y: auto; padding-top: 1.55rem; padding-right: 0.1rem; scrollbar-width: thin; }
+	.day-events::-webkit-scrollbar { width: 5px; }
+	.day-events::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 35%, transparent); border-radius: 999px; }
+	.event-chip { width: 100%; min-height: 24px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0.28rem; padding: 0.26rem 0.36rem; font-weight: 900; font-size: 0.72rem; line-height: 1.15; text-align: left; cursor: pointer; border: 1px solid color-mix(in srgb, var(--type) 32%, transparent); border-left: 4px solid var(--pay); border-radius: 6px; background: color-mix(in srgb, var(--type) 20%, var(--surface)); color: var(--text); }
+	.event-chip:first-child { margin-top: 0; }
+	.chip-time { color: var(--muted); font-size: 0.66rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+	.chip-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.chip-ticks { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: flex-end; gap: 0.1rem; }
+	.tick { font-size: 0.5rem; font-weight: 900; padding: 0.08rem 0.22rem; border-radius: 4px; line-height: 1.1; white-space: nowrap; }
 	.tick-k { background: #f59e0b; color: #fff; }
 	.tick-p { background: #16a34a; color: #fff; }
 	.tick-portal { background: #2563eb; color: #fff; }
@@ -1479,6 +1603,8 @@
 	.radio-group, .reminder-row { display: flex; flex-direction: column; justify-content: center; gap: 0.5rem; padding: 0.65rem; border-radius: 8px; background: var(--surface-strong); border: 1px solid var(--line); }
 	.radio-group label, .reminder-row label:first-child { flex-direction: row; align-items: center; }
 	.radio-group input, .reminder-row input[type='checkbox'] { width: auto; min-height: auto; accent-color: var(--accent); }
+	.notif-toggle { flex-direction: row !important; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 0.4rem; margin-top: 0.1rem; }
+	.notif-toggle.disabled { color: var(--danger); opacity: 0.8; }
 	.layout-checks { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
 	.empty-hint { color: var(--muted); font-size: 0.78rem; }
 	.danger-btn { margin-top: 0.5rem; padding: 0.65rem; width: 100%; background: transparent; border: 1px solid var(--danger); border-radius: 7px; color: var(--danger); font-weight: 900; cursor: pointer; }
@@ -1506,6 +1632,16 @@
 	.portal-link-row input { flex: 1; font-size: 0.8rem; }
 	.portal-link-row button { border: 0; border-radius: 7px; padding: 0.55rem 0.85rem; background: #2563eb; color: #fff; font-weight: 900; cursor: pointer; white-space: nowrap; }
 	.open-link { font-size: 0.78rem; color: #2563eb; text-decoration: none; font-weight: 800; }
+	.portal-photos-section { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.75rem; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 8px; }
+	.portal-photos-label { font-size: 0.78rem; font-weight: 900; color: var(--fg); }
+	.portal-photos-section > small { font-size: 0.74rem; color: var(--muted); margin-top: -0.2rem; }
+	.portal-photo-grid { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+	.portal-photo-item { position: relative; width: 64px; height: 64px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); }
+	.portal-photo-item img { width: 100%; height: 100%; object-fit: cover; }
+	.portal-photo-del { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,0.65); border: none; color: #fff; font-size: 0.75rem; line-height: 1; cursor: pointer; display: grid; place-items: center; }
+	.portal-photo-upload-btn { display: inline-flex; align-items: center; justify-content: center; padding: 0.45rem 0.85rem; background: var(--accent); color: #fff; border-radius: 7px; font-size: 0.8rem; font-weight: 800; cursor: pointer; transition: opacity 0.15s; }
+	.portal-photo-upload-btn.uploading { opacity: 0.55; cursor: not-allowed; }
+	.portal-photo-upload-btn input { display: none; }
 	.layout-perm-hint { display: flex; flex-direction: column; gap: 0.35rem; }
 	.layout-perm-hint small { color: var(--muted); font-size: 0.78rem; }
 	.layout-badge { display: inline-flex; padding: 0.35rem 0.65rem; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 6px; font-size: 0.78rem; font-weight: 800; }

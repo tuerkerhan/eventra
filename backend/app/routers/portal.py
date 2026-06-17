@@ -1,10 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException
+import os
+import uuid
+import json
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..email_utils import send_email
 from ..models import CustomerFormTypeField, Event, GuestSeating, OrgTypeField, PortalFormSubmission, Salon, VenueLayout, VenueTable
 from ..notify import notify
+from ..portal_uploads import delete_submission_photos, portal_event_dir
 from ..schemas import (
     GuestSeatOut,
     OrgTypeFieldOut,
@@ -17,6 +22,9 @@ from ..schemas import (
 )
 
 router = APIRouter(prefix="/portal", tags=["portal"])
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_PORTAL_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 def _get_event_by_token(token: str, db: Session) -> Event:
@@ -109,6 +117,7 @@ def get_portal_info(token: str, db: Session = Depends(get_db)):
         payment_complete=event.payment_complete,
         customer_payment_claimed=bool(event.customer_payment_claimed),
         portal_message=event.portal_message or "",
+        portal_photos=event.portal_photos or [],
     )
 
 
@@ -118,6 +127,91 @@ def submit_form(token: str, body: PortalFormSubmit, db: Session = Depends(get_db
     submission = PortalFormSubmission(event_id=event.id, data=body.data)
     db.add(submission)
     db.commit()
+    return {"ok": True}
+
+
+async def _store_portal_photos(event: Event, files: list[UploadFile] | None):
+    files = files or []
+    if len(files) > 10:
+        raise HTTPException(status_code=400, detail="En fazla 10 fotoğraf yüklenebilir")
+
+    target_dir = portal_event_dir(event.salon_id, event.id)
+    os.makedirs(target_dir, exist_ok=True)
+    uploaded = []
+
+    for file in files:
+        if file.content_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="Yalnızca JPG, PNG, WEBP veya GIF fotoğraf yüklenebilir")
+
+        content = await file.read()
+        if len(content) > MAX_PORTAL_IMAGE_BYTES:
+            raise HTTPException(status_code=400, detail="Fotoğraf boyutu 10 MB'ı geçemez")
+
+        original_name = file.filename or "fotoğraf"
+        ext = os.path.splitext(original_name)[1].lower()
+        if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+            ext = ".jpg"
+
+        stored_name = f"{uuid.uuid4().hex}{ext}"
+        path = os.path.join(target_dir, stored_name)
+        with open(path, "wb") as out:
+            out.write(content)
+
+        url = f"/uploads/portal/{event.salon_id}/{event.id}/{stored_name}"
+        uploaded.append({"name": original_name, "url": url, "size": len(content), "content_type": file.content_type})
+
+    return {"files": uploaded}
+
+
+@router.post("/{token}/form-photos")
+async def upload_form_photos(token: str, files: list[UploadFile] = File(...), db: Session = Depends(get_db)):
+    event = _get_event_by_token(token, db)
+    return await _store_portal_photos(event, files)
+
+
+@router.post("/{token}/form-with-photos")
+async def submit_form_with_photos(
+    token: str,
+    data: str = Form("{}"),
+    photo_keys: str = Form("[]"),
+    files: list[UploadFile] | None = File(None),
+    db: Session = Depends(get_db),
+):
+    event = _get_event_by_token(token, db)
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Form verisi geçersiz")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Form verisi geçersiz")
+    try:
+        photo_key_list = json.loads(photo_keys)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Fotoğraf alanları geçersiz")
+    if not isinstance(photo_key_list, list):
+        raise HTTPException(status_code=400, detail="Fotoğraf alanları geçersiz")
+
+    uploaded = (await _store_portal_photos(event, files))["files"]
+    if uploaded:
+        grouped: dict[str, list[dict]] = {}
+        for index, photo in enumerate(uploaded):
+            key = photo_key_list[index] if index < len(photo_key_list) else "__photos"
+            if not isinstance(key, str) or not key:
+                key = "__photos"
+            grouped.setdefault(key, []).append(photo)
+        for key, photos in grouped.items():
+            if key != "__photos":
+                payload[key] = photos
+        payload["__photos"] = uploaded
+
+    submission = PortalFormSubmission(event_id=event.id, data=payload)
+    try:
+        db.add(submission)
+        db.commit()
+    except Exception:
+        db.rollback()
+        delete_submission_photos({"__photos": uploaded})
+        raise
     return {"ok": True}
 
 

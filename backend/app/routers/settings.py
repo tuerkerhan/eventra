@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from ..core.deps import get_current_user
 from ..database import get_db
 from ..email_utils import send_email
+from ..core.security import hash_password
 from ..models import CustomerFieldDef, OrgTypeField, PortalFormField, Salon, SalonUser
 from ..schemas import (
     CustomerFieldDefIn,
@@ -54,6 +55,8 @@ def update_salon_settings(
     user: SalonUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Bu işlem için salon sahibi yetkisi gerekli")
     salon = _get_salon(user, db)
     for field, val in body.model_dump(exclude_none=True).items():
         setattr(salon, field, val)
@@ -68,12 +71,24 @@ def smtp_test(
     user: SalonUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Bu işlem için salon sahibi yetkisi gerekli")
     salon = _get_salon(user, db)
-    overrides = body.model_dump(exclude={"to_email"}, exclude_none=True)
-    for k, v in overrides.items():
-        setattr(salon, k, v)
+    # Build a temporary copy — do NOT mutate the persisted salon object with
+    # attacker-supplied values; only use body fields as a preview/override.
+    class _TempSalon:
+        pass
+    tmp = _TempSalon()
+    for attr in ("name", "company_name", "smtp_host", "smtp_port", "smtp_username",
+                 "smtp_password", "smtp_use_tls", "notification_email"):
+        setattr(tmp, attr, getattr(salon, attr))
+    allowed_overrides = {"smtp_host", "smtp_port", "smtp_username", "smtp_password",
+                         "smtp_use_tls"}
+    for k, v in body.model_dump(exclude={"to_email"}, exclude_none=True).items():
+        if k in allowed_overrides:
+            setattr(tmp, k, v)
     to_email = body.to_email or salon.notification_email
-    ok, detail = send_email(salon, to_email, "Eventra SMTP Test", "Bu bir test mailidir. SMTP ayarlarınız çalışıyor.")
+    ok, detail = send_email(tmp, to_email, "Eventra SMTP Test", "Bu bir test mailidir. SMTP ayarlarınız çalışıyor.")
     return {"ok": ok, "detail": detail}
 
 
@@ -253,4 +268,55 @@ def delete_portal_field(
     if not field:
         raise HTTPException(status_code=404, detail="Alan bulunamadı")
     db.delete(field)
+    db.commit()
+
+
+# ─── User management (owner only) ────────────────────────────────────────────
+
+@router.get("/users", response_model=list)
+def list_salon_users(user: SalonUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    from ..schemas import SalonUserOut
+    users = db.query(SalonUser).filter(SalonUser.salon_id == user.salon_id).all()
+    return [SalonUserOut.model_validate(u) for u in users]
+
+
+@router.post("/users", response_model=dict)
+def add_salon_user(
+    body: dict,
+    user: SalonUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    from ..schemas import SalonUserOut
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Sadece hesap sahibi kullanıcı ekleyebilir")
+    salon = db.query(Salon).filter(Salon.id == user.salon_id).first()
+    max_u = salon.max_users if salon else 5
+    current = db.query(SalonUser).filter(SalonUser.salon_id == user.salon_id).count()
+    if current >= max_u:
+        raise HTTPException(status_code=400, detail=f"Maksimum kullanıcı sayısına ({max_u}) ulaşıldı")
+    if db.query(SalonUser).filter(SalonUser.email == body.get("email")).first():
+        raise HTTPException(status_code=400, detail="Bu kullanıcı adı zaten kayıtlı")
+    new_user = SalonUser(
+        salon_id=user.salon_id,
+        email=body["email"],
+        username=body["username"],
+        hashed_password=hash_password(body["password"]),
+        role=body.get("role", "staff"),
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return SalonUserOut.model_validate(new_user).model_dump()
+
+
+@router.delete("/users/{user_id}", status_code=204)
+def remove_salon_user(user_id: str, user: SalonUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Sadece hesap sahibi kullanıcı silebilir")
+    target = db.query(SalonUser).filter(SalonUser.id == user_id, SalonUser.salon_id == user.salon_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+    if target.role == "owner":
+        raise HTTPException(status_code=400, detail="Hesap sahibi silinemez")
+    db.delete(target)
     db.commit()

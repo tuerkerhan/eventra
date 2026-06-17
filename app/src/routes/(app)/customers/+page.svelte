@@ -2,6 +2,15 @@
 	import { onMount } from 'svelte';
 	import { api, PORTAL_URL, type EventApi, type EventTypeApi, type VenueLayoutApi, type PortalFormSubmissionApi } from '$lib/api';
 
+	const API = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+	interface PortalPhoto {
+		name: string;
+		url: string;
+		size: number;
+		content_type: string;
+	}
+
 	let searchQuery = $state('');
 	let filterField = $state('all');
 	let sortBy = $state<'date' | 'name' | 'type'>('date');
@@ -96,13 +105,45 @@
 		selectedEventId = null;
 		submissions = [];
 	}
+
+	function portalPhotos(data: Record<string, unknown>): PortalPhoto[] {
+		const photos = data.__photos;
+		if (!Array.isArray(photos)) return [];
+		return photos.filter((p): p is PortalPhoto => {
+			return !!p && typeof p === 'object' && typeof (p as PortalPhoto).url === 'string';
+		});
+	}
+
+	function isPhotoList(value: unknown): value is PortalPhoto[] {
+		return Array.isArray(value) && value.some((p) => {
+			return !!p && typeof p === 'object' && typeof (p as PortalPhoto).url === 'string';
+		});
+	}
+
+	function formatSubmissionValue(value: unknown) {
+		if (typeof value === 'boolean') return value ? 'Evet' : 'Hayır';
+		if (value === null || value === undefined || value === '') return '—';
+		return String(value);
+	}
+
+	function photoUrl(url: string) {
+		return url.startsWith('http') ? url : `${API}${url}`;
+	}
+
+	async function deleteSubmission(submissionId: string) {
+		if (!selectedEvent) return;
+		const previous = submissions;
+		submissions = submissions.filter(s => s.id !== submissionId);
+		try {
+			await api.del(`/events/${selectedEvent.id}/portal-submissions/${submissionId}`);
+		} catch {
+			submissions = previous;
+		}
+	}
 </script>
 
 <section class="page-shell">
 	<div class="page-heading">
-		<div>
-			<h1>Davet Listesi</h1>
-		</div>
 		<a href="/calendar" class="new-btn">+ Yeni Davet</a>
 	</div>
 
@@ -332,15 +373,46 @@
 						{:else}
 							<div class="submissions-list">
 								{#each submissions as sub}
+									{@const photos = portalPhotos(sub.data)}
 									<div class="submission-card">
-										<div class="submission-meta">{formatDateTime(sub.submitted_at)}</div>
+										<div class="submission-head">
+											<div class="submission-meta">{formatDateTime(sub.submitted_at)}</div>
+											<button class="submission-delete" type="button" onclick={() => deleteSubmission(sub.id)}>Sil</button>
+										</div>
 										<div class="submission-data">
 											{#each Object.entries(sub.data) as [key, val]}
-												<div class="submission-row">
-													<span>{key}</span>
-													<strong>{String(val)}</strong>
-												</div>
+												{#if key !== '__photos' && isPhotoList(val)}
+													<div class="submission-photos">
+														<span>{key}</span>
+														<div class="photo-grid">
+															{#each val as photo}
+																<a href={photoUrl(photo.url)} target="_blank" class="photo-thumb">
+																	<img src={photoUrl(photo.url)} alt={photo.name} />
+																	<small>{photo.name}</small>
+																</a>
+															{/each}
+														</div>
+													</div>
+												{:else if key !== '__photos'}
+													<div class="submission-row">
+														<span>{key}</span>
+														<strong>{formatSubmissionValue(val)}</strong>
+													</div>
+												{/if}
 											{/each}
+											{#if photos.length > 0}
+												<div class="submission-photos">
+													<span>Fotoğraflar</span>
+													<div class="photo-grid">
+														{#each photos as photo}
+															<a href={photoUrl(photo.url)} target="_blank" class="photo-thumb">
+																<img src={photoUrl(photo.url)} alt={photo.name} />
+																<small>{photo.name}</small>
+															</a>
+														{/each}
+													</div>
+												</div>
+											{/if}
 										</div>
 									</div>
 								{/each}
@@ -367,7 +439,7 @@
 
 <style>
 	.page-shell { max-width: 1920px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
-	h1, h2, p { margin: 0; }
+	h2, p { margin: 0; }
 	.page-heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
 	.new-btn { padding: 0.75rem 1.25rem; background: var(--accent); color: #fff; border-radius: 8px; text-decoration: none; font-weight: 900; white-space: nowrap; }
 	.error-bar { padding: 0.75rem 1rem; background: color-mix(in srgb, #ef4444 12%, transparent); border: 1px solid #ef4444; border-radius: 8px; color: #ef4444; font-weight: 800; font-size: 0.85rem; }
@@ -469,11 +541,19 @@
 
 	.submissions-list { display: flex; flex-direction: column; gap: 0.6rem; }
 	.submission-card { background: var(--surface-strong); border: 1px solid var(--line); border-radius: 8px; padding: 0.65rem 0.85rem; display: flex; flex-direction: column; gap: 0.5rem; }
+	.submission-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 	.submission-meta { font-size: 0.74rem; color: var(--muted); font-weight: 800; }
+	.submission-delete { border: 1px solid color-mix(in srgb, #dc2626 35%, var(--line)); border-radius: 7px; background: color-mix(in srgb, #dc2626 7%, var(--surface)); color: #dc2626; font-size: 0.72rem; font-weight: 900; padding: 0.3rem 0.5rem; cursor: pointer; }
 	.submission-data { display: flex; flex-direction: column; gap: 0.3rem; }
 	.submission-row { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.82rem; }
 	.submission-row span { color: var(--muted); font-weight: 700; }
 	.submission-row strong { font-weight: 900; text-align: right; }
+	.submission-photos { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.35rem; }
+	.submission-photos > span { color: var(--muted); font-size: 0.78rem; font-weight: 800; }
+	.photo-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+	.photo-thumb { display: flex; flex-direction: column; gap: 0.3rem; color: var(--text); text-decoration: none; min-width: 0; }
+	.photo-thumb img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); }
+	.photo-thumb small { color: var(--muted); font-size: 0.68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 	.note-text { font-size: 0.84rem; color: var(--muted); line-height: 1.5; white-space: pre-wrap; }
 	.empty-hint { color: var(--muted); font-size: 0.82rem; font-style: italic; margin: 0; }

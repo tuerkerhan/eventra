@@ -54,3 +54,14 @@ def mark_all_read(user: SalonUser = Depends(get_current_user), db: Session = Dep
     ).update({"is_read": True})
     db.commit()
     return {"ok": True}
+
+
+@router.delete("/{notification_id}", status_code=204)
+def delete_notification(notification_id: str, user: SalonUser = Depends(get_current_user), db: Session = Depends(get_db)):
+    n = db.query(Notification).filter(
+        Notification.id == notification_id, Notification.salon_id == user.salon_id
+    ).first()
+    if not n:
+        raise HTTPException(status_code=404, detail="Bildirim bulunamadı")
+    db.delete(n)
+    db.commit()

@@ -306,9 +306,6 @@
 	{/if}
 
 	<div class="page-heading">
-		<div>
-			<h1>Masa & Salon Tasarımı</h1>
-		</div>
 		<div class="head-actions">
 			<input class="layout-name" bind:value={layoutName} placeholder="Salon adı" />
 			<button class="save-btn" class:saved={saved} disabled={saving} type="button" onclick={saveLayout}>
@@ -576,7 +573,7 @@
 <style>
 	.page-shell { max-width: 1600px; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; }
 	.page-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-	h1, p { margin: 0; }
+	p { margin: 0; }
 	.head-actions { display: flex; align-items: center; gap: 0.75rem; }
 	.layout-name { min-height: 38px; border: 1px solid var(--line); border-radius: 7px; padding: 0.5rem 0.75rem; background: var(--surface); color: var(--text); font: inherit; font-weight: 800; }
 	.save-btn { border: 0; border-radius: 8px; padding: 0.75rem 1.2rem; background: var(--accent); color: #fff; font-weight: 900; cursor: pointer; transition: background 0.2s; }
